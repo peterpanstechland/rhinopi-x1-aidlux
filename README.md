@@ -24,13 +24,15 @@
 4. [算力与系统体检](docs/03-compute-bench.md)
 5. [模型广场](docs/04-modelfarm.md)（撰写中）
 6. [工位回血](docs/05-shadow-puppet.md)
-7. 模型广场 / YOLO / CSI（后续章节）
+7. [宣传片拍摄与剪辑](docs/06-promo-video.md)
+8. 模型广场 / YOLO / CSI（后续章节）
 
 配套清单：
 
 - [拍照清单](docs/photo-checklist.md)
 - [实测记录](docs/experience-log.md)
 - [模型广场目录](docs/modelfarm-catalog.md)
+- [宣传片拍摄与剪辑](docs/06-promo-video.md)
 
 ## 示例代码
 

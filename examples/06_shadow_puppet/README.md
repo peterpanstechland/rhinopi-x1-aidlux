@@ -42,3 +42,5 @@ python3 render_probe.py --out /tmp/ui  # 不用人也能渲染每一屏，核对
 | NPU 底栏 | `cutoff_yolov5s_...qnn236.ctx.bin`（QNN236 DSP 脉冲） |
 
 坐姿评分看四项：低头前伸、塌坐、歪肩、离屏太近。回合结束后会按当时的坐姿重新标定基线。
+
+拍宣传片：`python3 game.py --demo`，机位和剪辑看 [docs/06-promo-video.md](../../docs/06-promo-video.md)。

@@ -63,3 +63,5 @@ http://192.168.88.216:8090/status
 - 手部：`palm_detection.tflite` + `hand_landmark.tflite`，只在弹琴那一屏加载
 - 弹琴时 pose 降到 1/3 帧率，手部每帧跑，保住帧率
 - 实测：久坐页约 13 fps；检出姿态后 POSE 约 90–105 ms
+
+拍宣传片（机位、口播、空位、70 秒 / 28 秒剪法）看 [拍摄与剪辑](06-promo-video.md)。录像用 `python3 game.py --demo`。
