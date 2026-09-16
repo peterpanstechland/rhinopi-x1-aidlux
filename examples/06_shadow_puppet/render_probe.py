@@ -178,11 +178,34 @@ def main() -> int:
         if act["scene"] == "piano":
             stage.keys_lit = {3: 1.0, 9: 0.6}
             stage.notes = [[70.0, 70.0], [210.0, 58.0]]
-            stage.tips = [(430.0, 520.0, 0), (860.0, 520.0, 1)]
+            stage.finger_press = [0, 0, 0.9, 0, 0, 0, 0, 0.4, 0, 0]
+        if act["scene"] == "wave":
+            stage.got = 6
+            stage.sign = 1.0
+            stage.gate_msg = "再见！"
+            stage.msg_t = 1.0
+            stage.pop = 0.3
+        if act["scene"] == "eagle":
+            stage.alt = 32.0
+            stage.scroll = 48.0
+            stage.wing_beat = 0.75
+            stage.avatar_dy = -3.0
         pose = pose_up if act["scene"] == "dino" else (pose_out if act["scene"] in ("wings", "eagle", "wave") else pose_down)
         puppet.have = False
         puppet.update(pose, 0.1)
-        m = Motion(wings=0.9, flap=0.6, wave=0.7, lean=0.5, lean_dir=0.6, piano=0.7, hands_up=0.8, turn=0.7, turn_dir=-0.7)
+        m = Motion(
+            wings=0.9,
+            flap=0.6,
+            wave=0.7,
+            lean=0.5,
+            lean_dir=0.6,
+            piano=0.7,
+            piano_lx=0.38,
+            piano_rx=0.64,
+            hands_up=0.8,
+            turn=0.7,
+            turn_dir=-0.7,
+        )
         game.sub = PLAY
         stage.step(m, hands, 0.05, False)
         shot(out, f"10_act_{act['scene']}", game, stage, puppet, m, pose, make_posture(80, ""), hands)

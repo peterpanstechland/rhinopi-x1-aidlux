@@ -14,10 +14,6 @@ from pixel_ui import (
     CLOUD,
     CLOUD_PAL,
     CYAN,
-    EAGLE_DN,
-    EAGLE_MID,
-    EAGLE_PAL,
-    EAGLE_UP,
     GRAY,
     GREEN,
     LIME,
@@ -61,6 +57,13 @@ DINO_SPEED = 78.0
 JUMP_V = -240.0   # higher leap so you clearly clear the cactus
 JUMP_G = 520.0
 DINO_HIT_HALF = 16  # steve + cactus overlap half-width
+
+# piano: ten keys for ten fingers — each finger owns exactly one key
+FINGERS_PER_HAND = 5
+PIANO_KEYS = FINGERS_PER_HAND * 2
+PIANO_KEY_W = 14  # sized so one hand spans its five keys
+PIANO_DIP = 0.16  # fingertip dip below the hand average that counts as a press
+HAND_FRAME_W = 1280.0  # hand landmarks come back in full-frame pixels
 
 # eagle flight — alt 0 on ground, ~56 at the flag
 EAGLE_MAX_ALT = 56.0
@@ -118,7 +121,7 @@ class Stage:
         self.notes: list[list[float]] = []
         self.press_base: dict[int, float] = {}
         self.press_armed: dict[int, bool] = {}
-        self.tips: list[tuple] = []
+        self.finger_press = [0.0] * PIANO_KEYS  # one per key, i.e. per finger
         self.left_got = 0.0
         self.right_got = 0.0
         self.nod_base = -1
@@ -156,7 +159,7 @@ class Stage:
         self.notes = []
         self.press_base = {}
         self.press_armed = {}
-        self.tips = []
+        self.finger_press = [0.0] * PIANO_KEYS
         self.left_got = 0.0
         self.right_got = 0.0
         self.nod_base = -1
@@ -199,7 +202,7 @@ class Stage:
         elif self.scene == "turn":
             self.text = f"左 {int(self.left_got)} / 右 {int(self.right_got)}  共 {int(self.need)}"
         elif self.scene == "piano":
-            self.text = f"{int(self.got)}/{int(self.need)}  按黄键"
+            self.text = f"{int(self.got)}/{int(self.need)}  按黄键那根手指"
         elif self.scene == "eagle":
             if self.falling:
                 cue = "失重下坠！快挥翅"
@@ -221,6 +224,14 @@ class Stage:
                 cue = "再举一点"
             else:
                 cue = "双手举到肩上→跳"
+            self.text = f"{int(self.got)}/{int(self.need)}  {cue}"
+        elif self.scene == "wave":
+            if self.done:
+                cue = "都送走了"
+            elif self.pop > 0:
+                cue = "再见！"
+            else:
+                cue = "左右挥手送人"
             self.text = f"{int(self.got)}/{int(self.need)}  {cue}"
         else:
             self.text = f"{int(self.got)} / {int(self.need)}"
@@ -315,9 +326,10 @@ class Stage:
             if self.vy < 0.0:
                 self.vy = 0.0
 
-        self.avatar_dy = -self.alt
+        # stay on stage — climb is told by the sky rushing past, not by flying off
+        self.avatar_dy = -3.0 if self.alt > 4 else 0.0
         climb = max(0.0, self.vy)
-        self.scroll += (18.0 + self.alt * 1.4 + climb * 0.55) * dt
+        self.scroll += (22.0 + self.alt * 2.0 + climb * 0.9) * dt
 
         # only scream "falling" when arms are really down
         self.falling = (not open_wings) and self.vy < -12.0 and self.alt > 8.0
@@ -346,9 +358,14 @@ class Stage:
         if s != 0.0 and s != self.sign:
             self.sign = s
             self._tick()
+            self.gate_msg = "再见！" if int(self.got) % 2 else "拜拜！"
+            self.msg_t = 0.4
 
     def _sim_ski(self, motion: Motion, hands, dt: float) -> None:
-        self.avatar_dx = motion.lean_dir * SKI_SWING
+        # soft follow — don't hard-snap dx every pose frame
+        target = motion.lean_dir * SKI_SWING
+        blend = min(1.0, 10.0 * dt)  # ~0.9 at 10 FPS, still responsive
+        self.avatar_dx += (target - self.avatar_dx) * blend
         me = AV_X + self.avatar_dx
         for g in self.gates:
             g["y"] += SKI_SPEED * dt
@@ -413,14 +430,17 @@ class Stage:
 
     def _sim_turn(self, motion: Motion, hands, dt: float) -> None:
         d = motion.turn_dir
-        if self.armed and abs(d) >= 0.6:
+        if self.armed and abs(d) >= 0.38:
             self.armed = False
             if d < 0 and self.left_got < self.need:
                 self.left_got += 1
+                self.gate_msg = "左转！"
             elif d > 0 and self.right_got < self.need:
                 self.right_got += 1
+                self.gate_msg = "右转！"
+            self.msg_t = 0.45
             self.pop = 0.45
-        elif abs(d) <= 0.22:
+        elif abs(d) <= 0.16:
             self.armed = True
         self.got = min(self.left_got, self.right_got)
 
@@ -437,61 +457,83 @@ class Stage:
         self.avatar_dy = 0.0
 
     def _sim_piano(self, motion: Motion, hands, dt: float) -> None:
-        """Hit the highlighted key — random freestyle presses don't count."""
+        """Ten keys, ten fingers: press the finger that already sits on the lit key."""
         for k in list(self.keys_lit):
             self.keys_lit[k] = max(0.0, self.keys_lit[k] - dt * 2.2)
         for n in self.notes:
             n[1] -= 40.0 * dt
         self.notes = [n for n in self.notes if n[1] > 16]
-        self.tips = []
-        n_keys = 10
+        for k in range(PIANO_KEYS):
+            self.finger_press[k] = max(0.0, self.finger_press[k] - dt * 2.8)
 
         def hit(key: int, good: bool) -> None:
             self.keys_lit[key] = 1.0
-            kw = max(1, (320 - 12) // n_keys)
-            self.notes.append([float(8 + key * kw), float(GROUND - 26)])
+            self.finger_press[key] = 1.0
+            self.notes.append([float(8 + key * PIANO_KEY_W), float(GROUND - 48)])
             if good:
                 self._tick()
-                self.target_key = (self.target_key + 2 + int(self.t * 3) % 3) % n_keys
+                self.target_key = (self.target_key + 3 + int(self.t * 5) % 4) % PIANO_KEYS
                 self.gate_msg = "好听！"
                 self.msg_t = 0.4
                 self.fail = 0.0
             else:
                 self.fail = 0.45
-                self.gate_msg = "按黄键！"
+                self.gate_msg = "按亮着的那根"
                 self.msg_t = 0.5
 
         used_hands = False
         if hands is not None and getattr(hands, "hands", None):
-            for hi, hand in enumerate(hands.hands[:2]):
-                tip = hand.xy[8]
+            # screen-left hand owns the low keys, screen-right hand the high ones
+            ordered = sorted(hands.hands[:2], key=lambda h: float(h.wrist[0]))
+            for idx, hand in enumerate(ordered):
+                if len(ordered) == 1:
+                    hi = 0 if float(hand.wrist[0]) < HAND_FRAME_W * 0.5 else 1
+                else:
+                    hi = idx
                 span = max(float(hand.span), 40.0)
-                self.tips.append((float(tip[0]), float(tip[1]), hi))
-                base = self.press_base.get(hi)
-                if base is None:
-                    self.press_base[hi] = float(tip[1])
-                    self.press_armed[hi] = True
-                    continue
-                drop = (float(tip[1]) - base) / span
-                if self.press_armed.get(hi, True) and drop > 0.32:
-                    self.press_armed[hi] = False
-                    key = self._key_at(float(tip[0]), n_keys)
-                    hit(key, abs(key - self.target_key) <= 1)
-                    used_hands = True
-                elif drop < 0.12:
-                    self.press_armed[hi] = True
-                self.press_base[hi] = base * 0.9 + float(tip[1]) * 0.1
+                # fingers left→right, so each one lands on its own key
+                tips = sorted(hand.tips, key=lambda p: float(p[0]))
+                mid_y = sum(float(t[1]) for t in tips) / len(tips)
+                for fi, tip in enumerate(tips):
+                    key = hi * FINGERS_PER_HAND + fi
+                    # a pressed finger dips below the rest of its own hand,
+                    # so moving the whole hand doesn't fire every key
+                    rel = (float(tip[1]) - mid_y) / span
+                    base = self.press_base.get(key)
+                    if base is None:
+                        self.press_base[key] = rel
+                        self.press_armed[key] = True
+                        continue
+                    dip = rel - base
+                    self.finger_press[key] = max(
+                        self.finger_press[key], max(0.0, min(1.0, dip / PIANO_DIP))
+                    )
+                    if self.press_armed.get(key, True) and dip > PIANO_DIP:
+                        self.press_armed[key] = False
+                        hit(key, key == self.target_key)
+                        used_hands = True
+                    elif dip < PIANO_DIP * 0.35:
+                        self.press_armed[key] = True
+                    self.press_base[key] = base * 0.94 + rel * 0.06
 
-        # pose fallback when hand model is missing / flaky
-        if not used_hands:
-            key = int(round(motion.piano_x * (n_keys - 1)))
-            key = max(0, min(n_keys - 1, key))
-            if self._edge(motion.piano, 0.45, 0.18):
-                hit(key, abs(key - self.target_key) <= 1)
+        # no hand model: wrist X picks the key, wrist bob presses it
+        if not used_hands and self._edge(motion.piano, 0.45, 0.18):
+            side = 0 if motion.piano_side == "l" else 1
+            nx = motion.piano_lx if side == 0 else motion.piano_rx
+            key = self._key_at(nx)
+            hit(key, abs(key - self.target_key) <= 1)
 
-    def _key_at(self, x_img: float, n_keys: int = 10) -> int:
-        k = int(x_img / 1280.0 * n_keys)
-        return max(0, min(n_keys - 1, k))
+        # Steve stays put; only the fingers play
+        self.avatar_dx = 0.0
+        self.avatar_dy = 0.0
+
+    def _key_at(self, nx: float) -> int:
+        """Keyboard-normalized X → key index."""
+        return max(0, min(PIANO_KEYS - 1, int(nx * PIANO_KEYS)))
+
+    def _key_geom(self, scr: PixelScreen) -> tuple[int, int]:
+        """Left edge and width of one key — shared by the keys and the hands."""
+        return (scr.lw - PIANO_KEYS * PIANO_KEY_W) // 2, PIANO_KEY_W
 
     # ---------- draw helpers ----------
 
@@ -582,95 +624,176 @@ class Stage:
         scr.seg_bar(114, 104, 92, 6, self.frac, LIME if hit else YELLOW, seg=5)
 
     def _bg_eagle(self, scr: PixelScreen) -> None:
-        """Looking sideways: world scrolls down as Steve climbs toward the flag."""
-        # sky bands — deeper blue higher up
+        """Steve stays put; the sky rushing down is what reads as climbing."""
+        high = self.alt / max(EAGLE_MAX_ALT, 1.0)
         scr.rect(0, 0, scr.lw, STAGE_H, AZURE)
-        scr.rect(0, 0, scr.lw, 28, NAVY)
-        # sun
-        scr.disc(40, 22, 9, YELLOW)
-        # vertical parallax: clouds & cliffs rush downward with scroll
-        drift = self.scroll * 1.8
-        for i in range(6):
-            y = int((i * 28 + drift) % (STAGE_H - 8)) - 12
-            if y >= STAGE_H - 4:
+        if high > 0.35:
+            scr.rect(0, 0, scr.lw, 22, NAVY)
+        scr.disc(36, 18, 7, YELLOW)
+        drift = self.scroll * 1.9
+        # clouds — main cue that you're going up
+        for i in range(7):
+            y = int((i * 22 + drift) % (STAGE_H + 16)) - 14
+            if y >= STAGE_H - 2:
                 continue
-            x = 20 + (i * 53) % 260
-            self._draw_cloud(scr, x, y, 2)
-        # distant cliffs sliding down — keep inside the stage band
-        for i in range(5):
-            y = int((i * 36 + drift * 0.7) % (STAGE_H - 10)) - 4
-            if y + 28 > STAGE_H:
+            self._draw_cloud(scr, 16 + (i * 47) % 250, y, 1 if i % 3 else 2)
+        # tiny traffic, same scroll family as the clouds — never bigger than a cloud
+        for i in range(4):
+            y = int((i * 31 + drift * 1.15 + 11) % (STAGE_H + 20)) - 10
+            if not (2 < y < STAGE_H - 8):
                 continue
-            x = 8 if i % 2 == 0 else scr.lw - 50
-            scr.tri_up(x, y, 42, 28, SLATE)
-            scr.tri_up(x + 8, y + 10, 28, 18, NIGHT)
-        # ground only when near takeoff
-        if self.alt < 18:
-            gy = min(GROUND + int(self.alt * 1.2), STAGE_H - 2)
+            x = 28 + (i * 71) % 240
+            if i % 2 == 0:
+                self._draw_tiny_plane(scr, x, y)
+            else:
+                self._draw_tiny_bird(scr, x, y, i)
+        # ground only at takeoff — slides off the bottom, no giant up-arrows
+        if self.alt < 16:
+            gy = min(GROUND + int(self.alt * 1.4), STAGE_H - 2)
             scr.rect(0, gy, scr.lw, STAGE_H - gy, TEAL)
             scr.rect(0, gy, scr.lw, 2, LIME)
             for i in range(0, scr.lw, 16):
                 scr.rect(i, min(gy + 4, STAGE_H - 1), 8, 2, GREEN)
-        # flag fixed near the top — climb to it
-        fx = scr.lw - 48
-        fy = 26
-        pole_h = 36
-        scr.rect(fx + 8, fy, 3, pole_h, SLATE)
-        col = LIME if self.done else RED
-        scr.rect(fx + 11, fy, 22, 12, col)
-        scr.rect(fx + 11, fy, 22, 2, NIGHT)
+        # small flag at the top — destination, not a giant arrow
+        fx, fy = scr.lw - 28, 22
+        scr.rect(fx, fy, 2, 14, SLATE)
+        scr.rect(fx + 2, fy, 10, 6, LIME if self.done else RED)
         if self.done:
-            scr.sprite(fx + 14, fy + 14, STAR, STAR_PAL)
-        # altitude tape on the left
-        scr.rect(4, 24, 6, 70, NIGHT)
-        scr.rect(5, 25, 4, 68, SLATE)
-        mark = 25 + 68 - int((self.alt / EAGLE_MAX_ALT) * 68)
-        scr.rect(3, mark - 2, 8, 4, LIME if not self.falling else RED)
+            scr.sprite(fx + 3, fy + 8, STAR, STAR_PAL)
+
+    def _draw_tiny_plane(self, scr: PixelScreen, x: int, y: int) -> None:
+        """Background airliner — about cloud-sized, not a prop."""
+        scr.rect(x, y + 1, 11, 2, SLATE)
+        scr.rect(x + 4, y, 3, 4, SILVER)
+        scr.rect(x + 9, y, 2, 2, NIGHT)
+        scr.rect(x + 1, y + 1, 2, 1, WHITE)
+
+    def _draw_tiny_bird(self, scr: PixelScreen, x: int, y: int, phase: int = 0) -> None:
+        """Background flock bird — two-pixel wings, not a second Steve."""
+        flap = 1 if (int(self.scroll) + phase) % 2 == 0 else 0
+        scr.rect(x + 2, y + 1, 2, 1, NIGHT)
+        scr.rect(x, y + flap, 3, 1, SLATE)
+        scr.rect(x + 3, y + flap, 3, 1, SLATE)
 
     def draw_wings(self, scr: PixelScreen, ax: int, ay: int) -> None:
-        """Big eagle wings behind Steve; flap opens/closes them."""
+        """Bird wings: four stacked feathers per side, lift on a flap."""
         if self.scene != "eagle":
             return
-        beat = max(0.0, min(1.0, self.wing_beat))
-        # pick sprite frame
-        if beat > 0.7:
-            spr = EAGLE_UP
-        elif beat > 0.35:
-            spr = EAGLE_MID
+        beat = 0.08 if self.falling else max(0.0, min(1.0, self.wing_beat))
+        # four feathers, fanned so they never collapse into one slab
+        for side in (-1, 1):
+            sx = ax + side * 7
+            sy = ay + 4
+            for k in range(4):
+                length = 18 - k * 2
+                # rest = fan down; flap rotates the fan up but keeps the spread
+                y1 = sy + (2 + k * 5) - int(beat * (10 + k))
+                x0 = sx + side * 2
+                x1 = sx + side * (4 + length)
+                steps = max(abs(x1 - x0), abs(y1 - sy), 1)
+                col = YELLOW if k == 0 else ORANGE
+                for i in range(steps + 1):
+                    xx = x0 + (x1 - x0) * i // steps
+                    yy = sy + (y1 - sy) * i // steps
+                    w = 2 if i > steps * 3 // 4 else 3
+                    fx = xx if side > 0 else xx - w + 1
+                    scr.rect(fx, yy, w, 2, col)
+                tip = x1 if side > 0 else x1 - 1
+                scr.rect(tip, y1, 2, 2, NIGHT)
+
+    def _draw_buddy(self, scr: PixelScreen, x: int, foot: int, shirt, wave: int) -> None:
+        """Tiny colleague on the platform. wave -1/0/+1 = left / rest / right arm."""
+        scr.rect(x - 3, foot - 1, 3, 2, NIGHT)
+        scr.rect(x + 1, foot - 1, 3, 2, NIGHT)
+        scr.rect(x - 2, foot - 8, 2, 7, NAVY)
+        scr.rect(x + 1, foot - 8, 2, 7, NAVY)
+        scr.rect(x - 3, foot - 17, 7, 9, shirt)
+        scr.rect(x - 1, foot - 16, 3, 2, NIGHT)
+        scr.rect(x - 2, foot - 23, 5, 6, SILVER)
+        scr.rect(x - 2, foot - 23, 5, 2, NIGHT)
+        scr.rect(x - 1, foot - 20, 1, 1, NIGHT)
+        scr.rect(x + 1, foot - 20, 1, 1, NIGHT)
+        if wave > 0:
+            scr.rect(x + 4, foot - 21, 2, 7, shirt)
+            scr.rect(x + 4, foot - 24, 3, 3, SILVER)
+            scr.rect(x - 5, foot - 13, 2, 5, shirt)
+        elif wave < 0:
+            scr.rect(x - 5, foot - 21, 2, 7, shirt)
+            scr.rect(x - 6, foot - 24, 3, 3, SILVER)
+            scr.rect(x + 4, foot - 13, 2, 5, shirt)
         else:
-            spr = EAGLE_DN
-        # chunky wings (scaled sprites + fill)
-        spread = 10 + int(beat * 16)
-        for side, flip in ((-1, True), (1, False)):
-            ox = ax + side * (8 + spread // 2)
-            oy = ay + 2
-            # membrane
-            for i in range(spread):
-                t = i / max(1, spread - 1)
-                yoff = int((1.0 - beat) * 6 * t) if self.falling else int(-beat * 4 * t)
-                w = 5 - int(t * 2)
-                scr.rect(ox + side * i - w // 2, oy + yoff, w, 4, ORANGE)
-                scr.rect(ox + side * i - w // 2, oy + yoff + 1, w, 2, YELLOW)
-            # tip feather
-            tip_x = ox + side * spread
-            scr.rect(tip_x - 1, oy - 2 - int(beat * 3), 4, 8, NIGHT)
-            scr.rect(tip_x, oy - 1 - int(beat * 3), 2, 6, ORANGE)
-            scr.sprite(ax + side * 18 - 4, ay - 2, spr, EAGLE_PAL)
+            scr.rect(x - 5, foot - 14, 2, 6, shirt)
+            scr.rect(x + 4, foot - 14, 2, 6, shirt)
+
+    def _draw_wave_train(self, scr: PixelScreen, x: int, y: int) -> None:
+        """Horizon commuter — leaves as people get waved off. y is the rail."""
+        rail0 = max(0, x - 12)
+        rail1 = min(scr.lw, x + 112)
+        if rail1 > rail0:
+            scr.rect(rail0, y, rail1 - rail0, 2, NIGHT)
+        for i in range(2):
+            cx = x + i * 52
+            if cx > scr.lw + 8 or cx + 48 < -8:
+                continue
+            scr.rect(cx, y - 20, 48, 18, SILVER)
+            scr.rect(cx, y - 8, 48, 3, RED)
+            scr.frame(cx, y - 20, 48, 18, NIGHT)
+            if i == 0:
+                scr.rect(cx - 10, y - 16, 12, 14, WHITE)
+                scr.rect(cx - 8, y - 12, 5, 4, YELLOW)
+            for w in range(2):
+                wx = cx + 6 + w * 20
+                onboard = int(self.got) > i * 2 + w
+                scr.rect(wx, y - 16, 14, 8, AZURE if onboard else NAVY)
+                if onboard:
+                    scr.rect(wx + 5, y - 15, 4, 4, WHITE)
+                    flap = 1 if int(self.t * 8 + i + w) % 2 == 0 else 0
+                    scr.rect(wx + 10, y - 16 - flap, 2, 4, CYAN)
+            scr.rect(cx + 8, y - 4, 6, 4, NIGHT)
+            scr.rect(cx + 34, y - 4, 6, 4, NIGHT)
 
     def _bg_wave(self, scr: PixelScreen) -> None:
-        self._sky(scr, PLUM, SLATE, GRAY)
-        off = int(self.scroll * 1.6) % 120
-        for c in range(4):
-            x = 8 + c * 100 - off
-            h = 40 + (c % 3) * 6
-            scr.rect(x, GROUND - h, 88, h, SLATE)
-            scr.frame(x, GROUND - h, 88, h, NIGHT)
-            for wd in range(4):
-                for row in range(2):
-                    lit = (c + wd + row + int(self.got)) % 2 == 0
-                    scr.rect(x + 8 + wd * 18, GROUND - h + 8 + row * 14, 12, 10, CYAN if lit else AZURE)
-            scr.rect(x + 12, GROUND - 4, 12, 4, NIGHT)
-            scr.rect(x + 60, GROUND - 4, 12, 4, NIGHT)
+        """Dusk platform: wave people off as the last train leaves."""
+        scr.rect(0, 0, scr.lw, STAGE_H, NAVY)
+        scr.rect(0, 24, scr.lw, 20, PLUM)
+        scr.rect(0, 44, scr.lw, GROUND - 44, TEAL)
+        for hx, hw, hh in ((0, 90, 16), (70, 70, 12), (200, 80, 14)):
+            scr.rect(hx, 44, hw, hh, SLATE)
+        scr.disc(292, 26, 9, ORANGE)
+        scr.disc(292, 26, 5, YELLOW)
+        self._draw_cloud(scr, 40, 24, 1)
+        self._draw_cloud(scr, 150, 22, 2)
+        self._draw_tiny_bird(scr, 230, 30, 0)
+        self._draw_tiny_bird(scr, 252, 36, 1)
+        # stay in the sky band; still on-screen at mid-progress
+        self._draw_wave_train(scr, 48 - int(self.frac * 90), 56)
+        scr.rect(0, 22, scr.lw, 3, SLATE)
+        scr.rect(0, 22, scr.lw, 1, SILVER)
+        for px in (6, scr.lw - 10):
+            scr.rect(px, 25, 3, GROUND - 25, GRAY)
+        for lx in (28, 88, 232, 292):
+            scr.rect(lx, 25, 2, 8, NIGHT)
+            scr.rect(lx - 3, 32, 8, 4, YELLOW)
+        for fx in range(0, 128, 8):
+            scr.rect(fx, GROUND - 16, 2, 10, NIGHT)
+        for fx in range(192, scr.lw, 8):
+            scr.rect(fx, GROUND - 16, 2, 10, NIGHT)
+        scr.rect(0, GROUND - 16, 128, 2, SILVER)
+        scr.rect(192, GROUND - 16, scr.lw - 192, 2, SILVER)
+        scr.rect(0, GROUND - 6, scr.lw, 6, SLATE)
+        scr.rect(0, GROUND, scr.lw, STAGE_H - GROUND, GRAY)
+        for i in range(0, scr.lw, 14):
+            scr.rect(i, GROUND - 2, 8, 2, YELLOW)
+        shirts = (CYAN, ORANGE, LIME, YELLOW, RED, AZURE, PLUM, SILVER, GREEN, WHITE)
+        spots = (20, 42, 64, 86, 108, 212, 234, 256, 278, 300)
+        sent = int(self.got)
+        newest = sent - 1
+        for i, sx in enumerate(spots):
+            greeted = i < sent
+            wave = (1 if int(self.t * 7 + i * 1.7) % 2 == 0 else -1) if greeted else 0
+            self._draw_buddy(scr, sx, GROUND, shirts[i], wave)
+            if greeted and ((i == newest and self.pop > 0) or int(self.t * 3 + i) % 6 == 0):
+                scr.sprite(sx - 1, GROUND - 30, STAR, STAR_PAL)
 
     def _bg_ski(self, scr: PixelScreen) -> None:
         """Downhill run: slope scrolls toward the skier."""
@@ -785,18 +908,31 @@ class Stage:
             scr.sprite(140 + (i % 3) * 12, 28 + (i // 3) * 12, STAR, STAR_PAL)
 
     def _bg_piano(self, scr: PixelScreen) -> None:
+        """Room + piano case; keys/hands drawn after seated Steve."""
         scr.rect(0, 0, scr.lw, STAGE_H, NIGHT)
-        scr.rect(0, 0, scr.lw, GROUND - 28, PLUM)
+        scr.rect(0, 0, scr.lw, GROUND - 36, PLUM)
         for i in range(5):
-            self._draw_cloud(scr, 20 + i * 60, 10 + (i % 2) * 6, 1)
+            self._draw_cloud(scr, 20 + i * 60, 8 + (i % 2) * 6, 1)
+        # back wall shelf
+        scr.rect(0, GROUND - 40, scr.lw, 4, SLATE)
+        # chair behind the keyboard (Steve sits on this)
+        cx = AV_X
+        scr.rect(cx - 22, GROUND - 38, 44, 6, NIGHT)
+        scr.rect(cx - 20, GROUND - 36, 40, 4, SLATE)
+        scr.rect(cx - 18, GROUND - 32, 6, 18, NIGHT)
+        scr.rect(cx + 12, GROUND - 32, 6, 18, NIGHT)
         for n in self.notes:
             scr.sprite(int(n[0]), int(n[1]), NOTE, NOTE_PAL)
-        keys = 10
-        kw = (scr.lw - 12) // keys
-        scr.rect(2, GROUND - 30, scr.lw - 4, 34, NIGHT)
-        scr.rect(4, GROUND - 28, scr.lw - 8, 30, SLATE)
-        for i in range(keys):
-            x = 6 + i * kw
+
+    def draw_piano_keys(self, scr: PixelScreen) -> None:
+        """Keyboard in front of Steve's torso so he reads as sitting behind it."""
+        x0, kw = self._key_geom(scr)
+        # piano body / fallboard
+        scr.rect(2, GROUND - 34, scr.lw - 4, 38, NIGHT)
+        scr.rect(4, GROUND - 32, scr.lw - 8, 10, SLATE)
+        scr.rect(4, GROUND - 22, scr.lw - 8, 24, GRAY)
+        for i in range(PIANO_KEYS):
+            x = x0 + i * kw
             lit = self.keys_lit.get(i, 0.0)
             target = i == self.target_key
             if lit > 0.3:
@@ -805,15 +941,29 @@ class Stage:
                 col = YELLOW
             else:
                 col = WHITE
-            scr.rect(x, GROUND - 24, kw - 1, 26, col)
-            scr.frame(x, GROUND - 24, kw - 1, 26, NIGHT)
+            # white keys sit on top of the case
+            scr.rect(x, GROUND - 28, kw - 1, 28, col)
+            scr.frame(x, GROUND - 28, kw - 1, 28, NIGHT)
             if i % 7 not in (2, 6):
-                scr.rect(x + max(1, kw - 5), GROUND - 24, 4, 15, NIGHT)
+                scr.rect(x + max(1, kw - 5), GROUND - 28, 4, 16, NIGHT)
             if target:
-                # big arrow above the key to press
-                scr.tri_up(x + kw // 2 - 5, GROUND - 38, 10, 10, YELLOW)
-                scr.rect(x + kw // 2 - 2, GROUND - 30, 4, 6, YELLOW)
-        scr.text(8, 86, "只按黄色键", YELLOW, 12)
+                scr.tri_up(x + kw // 2 - 5, GROUND - 42, 10, 10, YELLOW)
+                scr.rect(x + kw // 2 - 2, GROUND - 34, 4, 6, YELLOW)
+        scr.text(8, 36, "亮哪个键", YELLOW, 12)
+        scr.text(8, 48, "就动那根指", YELLOW, 12)
+
+    def piano_hand_targets(self, scr: PixelScreen) -> list[tuple[int, int, list, int]]:
+        """Per hand: palm spot plus its five fingers parked on their own keys."""
+        x0, kw = self._key_geom(scr)
+        out = []
+        for hi in (0, 1):
+            fingers = [
+                (x0 + k * kw + kw // 2, self.finger_press[k])
+                for k in range(hi * FINGERS_PER_HAND, (hi + 1) * FINGERS_PER_HAND)
+            ]
+            palm_x = (fingers[0][0] + fingers[-1][0]) // 2
+            out.append((palm_x, GROUND - 32, fingers, kw))
+        return out
 
     # ---------- foreground ----------
 
@@ -857,13 +1007,6 @@ class Stage:
                 scr.text(AV_X - 18, ay - 28, "起飞", LIME, 14)
             if self.done:
                 scr.text(AV_X - 34, 30, "抓到旗子", LIME, 16)
-        if self.scene == "piano":
-            for tx, ty, hi in self.tips:
-                px = int(tx / 1280.0 * scr.lw)
-                py = GROUND - 34
-                col = CYAN if hi == 0 else YELLOW
-                scr.rect(px - 2, py, 5, 5, col)
-                scr.rect(px - 1, py + 5, 3, 6, col)
         if self.fail > 0:
             scr.frame(0, 0, scr.lw, STAGE_H, RED, 2)
         if self.msg_t > 0 and self.gate_msg:

@@ -32,7 +32,8 @@ class Motion:
     lean: float = 0.0
     lean_dir: float = 0.0
     piano: float = 0.0
-    piano_x: float = 0.5  # 0..1 across body for pose-fallback keys
+    piano_lx: float = 0.35  # 0..1 across the keyboard
+    piano_rx: float = 0.65
     hands_up: float = 0.0
     jump: float = 0.0  # 1-frame pulse
     jump_armed: bool = True
@@ -63,6 +64,9 @@ class GestureTracker:
     nod_down: float = 0.0
     flap_dir: float = 0.0
     prev_wy: float | None = None
+    lean_e: float = 0.0  # smoothed ski lean (-1..1)
+    home_sh_x: float | None = None  # slow shoulder baseline for chair-shift
+    turn_e: float = 0.0  # smoothed head yaw (-1..1)
 
     def update(self, pose: PoseResult) -> Motion:
         l_sh, r_sh = _p(pose, 11), _p(pose, 12)
@@ -77,6 +81,11 @@ class GestureTracker:
             self.prev_r = r_wr
             self.prev_nose = nose
             self.prev_mid_y = None
+            # hold last lean / turn so a flicker doesn't snap to center
+            m.lean_dir = float(np.clip(self.lean_e, -1.0, 1.0))
+            m.lean = abs(m.lean_dir)
+            m.turn_dir = float(np.clip(self.turn_e, -1.0, 1.0))
+            m.turn = abs(m.turn_dir)
             return m
         sh_w = float(np.linalg.norm(r_sh - l_sh)) + 1e-3
         span = float(abs(r_wr[0] - l_wr[0])) / sh_w
@@ -94,9 +103,13 @@ class GestureTracker:
             m.wings *= 0.45
             m.wing_l *= 0.45
             m.wing_r *= 0.45
-        # horizontal hand position for piano fallback (0=left … 1=right of torso)
+        # wrist X across the keyboard — every key must stay reachable
         mid_x = float(mid_sh[0])
-        m.piano_x = float(np.clip(((l_wr[0] + r_wr[0]) * 0.5 - mid_x) / (sh_w * 2.2) + 0.5, 0.0, 1.0))
+        m.piano_lx = float(np.clip((l_wr[0] - mid_x) / (sh_w * 2.6) + 0.5, 0.03, 0.97))
+        m.piano_rx = float(np.clip((r_wr[0] - mid_x) / (sh_w * 2.6) + 0.5, 0.03, 0.97))
+        # keep left visually left of right on the keyboard
+        if m.piano_lx > m.piano_rx:
+            m.piano_lx, m.piano_rx = m.piano_rx, m.piano_lx
 
         # hands_up: average wrist height vs shoulders (desk-friendly)
         l_el, r_el = _p(pose, 13), _p(pose, 14)
@@ -133,15 +146,49 @@ class GestureTracker:
         ):
             self.jump_armed = True
 
-        if mid_hip is not None:
-            m.lean_dir = float(np.clip((mid_sh[0] - mid_hip[0]) / (sh_w * 0.55), -1.0, 1.0))
-        else:
-            m.lean_dir = float(np.clip((r_sh[1] - l_sh[1]) / (sh_w * 0.35), -1.0, 1.0))
-        m.lean = abs(m.lean_dir)
+        # SKI lean: prefer head vs shoulders (stable at desk). Old fallback used
+        # shoulder height tilt and snapped to 0 whenever pose flickered.
+        raw_lean = 0.0
         if nose is not None:
-            off = float((nose[0] - mid_sh[0]) / (sh_w * 0.45))
-            m.turn_dir = float(np.clip(off, -1.0, 1.0))
-            m.turn = abs(m.turn_dir)
+            raw_lean = float((nose[0] - mid_sh[0]) / (sh_w * 0.42))
+        if mid_hip is not None:
+            torso = float((mid_sh[0] - mid_hip[0]) / (sh_w * 0.55))
+            raw_lean = 0.75 * raw_lean + 0.25 * torso if nose is not None else torso
+        # whole-chair shift: shoulder mid vs slow home position
+        if self.home_sh_x is None:
+            self.home_sh_x = float(mid_sh[0])
+        else:
+            self.home_sh_x = 0.97 * self.home_sh_x + 0.03 * float(mid_sh[0])
+        shift = float((mid_sh[0] - self.home_sh_x) / (sh_w * 0.85))
+        raw_lean = float(np.clip(0.7 * raw_lean + 0.3 * shift, -1.35, 1.35))
+        # EMA + deadzone — kills center twitch at ~10 FPS
+        self.lean_e = 0.78 * self.lean_e + 0.22 * raw_lean
+        shown = self.lean_e if abs(self.lean_e) >= 0.10 else 0.0
+        m.lean_dir = float(np.clip(shown, -1.0, 1.0))
+        m.lean = abs(m.lean_dir)
+
+        # TURN: ears + nose. Shoulder-only yaw dies when the torso follows the head
+        # (common on a right look). Screen-right = 右转.
+        l_ear, r_ear = _p(pose, 7, 0.08), _p(pose, 8, 0.08)
+        raw_turn = 0.0
+        if nose is not None:
+            raw_turn = float((nose[0] - mid_sh[0]) / (sh_w * 0.38))
+        if nose is not None and l_ear is not None and r_ear is not None:
+            ear_w = abs(float(r_ear[0] - l_ear[0])) + 1e-3
+            ear_mid = (float(l_ear[0]) + float(r_ear[0])) * 0.5
+            yaw = (float(nose[0]) - ear_mid) / max(ear_w * 0.45, sh_w * 0.10)
+            near = (
+                abs(float(nose[0]) - float(l_ear[0])) - abs(float(nose[0]) - float(r_ear[0]))
+            ) / max(ear_w, 1.0)
+            raw_turn = 0.6 * yaw + 0.4 * near
+        elif nose is not None and l_ear is not None and r_ear is None:
+            # only screen-left ear visible → looking screen-right
+            raw_turn = max(raw_turn, 0.72)
+        elif nose is not None and r_ear is not None and l_ear is None:
+            raw_turn = min(raw_turn, -0.72)
+        self.turn_e = 0.72 * self.turn_e + 0.28 * float(np.clip(raw_turn, -1.4, 1.4))
+        m.turn_dir = float(np.clip(self.turn_e, -1.0, 1.0))
+        m.turn = abs(m.turn_dir)
         if self.prev_l is not None and self.prev_r is not None:
             vl = float(np.linalg.norm(l_wr - self.prev_l))
             vr = float(np.linalg.norm(r_wr - self.prev_r))

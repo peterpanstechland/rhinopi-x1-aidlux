@@ -97,6 +97,8 @@ BODY_H = TORSO_H + LEG_H  # 36
 # shoulders sit this far below the top of the head block
 SH_HALF = 6.0
 LIMB_W = LEG_W  # back-compat alias
+# seated piano Steve is drawn bigger so the hands read on the keys
+PIANO_SCALE = 2
 
 
 def _unit(v, fallback):
@@ -203,6 +205,7 @@ class PixelPuppet:
 
         style='nod' → bobblehead + big vertical travel so the nod reads as a game beat.
         style='turn' → bigger head yaw.
+        style='piano' → seated torso+head only (hands drawn on the keyboard separately).
         """
         if not self.have:
             return
@@ -211,9 +214,39 @@ class PixelPuppet:
         down = np.array([0.0, 1.0], np.float32)
         bobble = style == "nod"
         turny = style == "turn"
-        head_scale = 3 if bobble else (2 if turny else 1)
+        seated = style == "piano"
+        head_scale = 3 if bobble else (2 if turny else (PIANO_SCALE if seated else 1))
         hw = HEAD_W * head_scale
         hh = HEAD_H * head_scale
+
+        if seated:
+            s = PIANO_SCALE
+            tw, th = TORSO_W * s, TORSO_H * s
+            # short pants peeking under the fallboard; no dangling mocap arms
+            ly = cy + th - 2 * s
+            for dx in (-tw // 2 + s, s):
+                scr.rect(cx + dx - 1, ly - 1, LEG_W * s + 1, 5 * s, NIGHT)
+                scr.rect(cx + dx, ly, LEG_W * s - 1, 4 * s, PANTS)
+            tx = cx - tw // 2
+            scr.rect(tx - 1, cy - 1, tw + 2, th + 2, NIGHT)
+            scr.rect(tx, cy, tw, th, shirt)
+            scr.rect(tx, cy, tw, 2 * s, SHIRT_LT if shirt is SHIRT else shirt)
+            scr.rect(cx - 1, cy + 2 * s, 2, th - 2 * s, SHIRT_DK)
+            scr.rect(cx - s, cy, 2 * s, 2, SKIN_DK)
+            # arms live in draw_piano_arms so they can reach the keys
+            nose = self.j.get("nose", np.array([0.0, -1.6], np.float32))
+            hdx = int(np.clip(nose[0] * 3.0, -3, 3))
+            hdy = int(np.clip((nose[1] + 1.6) * 2.5, -2, 3))
+            hx = cx - hw // 2 + hdx
+            hy = cy - hh + 2 * s + hdy
+            hy = min(hy, cy + 3 * s)
+            hy = max(hy, cy - hh - 3 * s)
+            self._bar(scr, (cx, cy + 1), (hx + hw // 2, hy + hh), 2 * s, SKIN_DK)
+            scr.rect(hx - 1, hy - 1, hw + 2, hh + 2, NIGHT)
+            self._blit_head(scr, hx, hy, head_scale, HEAD)
+            if self.face == "happy":
+                scr.rect(hx + 2 * s, hy + 8 * s, 8 * s, 2 * s, accent)
+            return
 
         # legs first — flush under the torso
         ly = cy + TORSO_H
@@ -225,25 +258,26 @@ class PixelPuppet:
             scr.rect(cx + dx, ly + LEG_H - 4, LEG_W, 4, SHOE)
             scr.rect(cx + dx, ly + LEG_H - 4, LEG_W, 1, NIGHT)
 
-        # slim arms
-        for side, sx in (("l", -1), ("r", 1)):
-            sh = self.j.get(f"{side}_sh")
-            el = self.j.get(f"{side}_el")
-            wr = self.j.get(f"{side}_wr")
-            if sh is None or el is None or wr is None:
-                continue
-            d1 = _unit(el - sh, down)
-            d2 = _unit(wr - el, down)
-            ax = cx + sx * (TORSO_W // 2 + ARM_W // 2 + 1)
-            ay = cy + 2
-            ex = int(round(ax + d1[0] * UPPER_ARM))
-            ey = int(round(ay + d1[1] * UPPER_ARM))
-            wx = int(round(ex + d2[0] * FORE_ARM))
-            wy = int(round(ey + d2[1] * FORE_ARM))
-            self._bar(scr, (ax, ay), (ex, ey), ARM_W, shirt)
-            self._bar(scr, (ex, ey), (wx, wy), ARM_W, SKIN)
-            scr.rect(wx - 1, wy - 1, 3, 3, NIGHT)
-            scr.rect(wx, wy, 2, 2, SKIN_LT)
+        # eagle: bird wings are drawn by the stage; skip mocap arms (they read as jet wings)
+        if style != "eagle":
+            for side, sx in (("l", -1), ("r", 1)):
+                sh = self.j.get(f"{side}_sh")
+                el = self.j.get(f"{side}_el")
+                wr = self.j.get(f"{side}_wr")
+                if sh is None or el is None or wr is None:
+                    continue
+                d1 = _unit(el - sh, down)
+                d2 = _unit(wr - el, down)
+                ax = cx + sx * (TORSO_W // 2 + ARM_W // 2 + 1)
+                ay = cy + 2
+                ex = int(round(ax + d1[0] * UPPER_ARM))
+                ey = int(round(ay + d1[1] * UPPER_ARM))
+                wx = int(round(ex + d2[0] * FORE_ARM))
+                wy = int(round(ey + d2[1] * FORE_ARM))
+                self._bar(scr, (ax, ay), (ex, ey), ARM_W, shirt)
+                self._bar(scr, (ex, ey), (wx, wy), ARM_W, SKIN)
+                scr.rect(wx - 1, wy - 1, 3, 3, NIGHT)
+                scr.rect(wx, wy, 2, 2, SKIN_LT)
 
         # torso — tip forward a bit while nodding down
         tip = 0
@@ -303,6 +337,39 @@ class PixelPuppet:
         elif self.face == "tired":
             scr.rect(hx + 2 * head_scale, hy + 5 * head_scale, 3 * head_scale, 2 * head_scale, MOUTH)
             scr.rect(hx + 7 * head_scale, hy + 5 * head_scale, 3 * head_scale, 2 * head_scale, MOUTH)
+
+    def draw_piano_arms(self, scr: PixelScreen, cx: int, cy: int, targets, shirt=SHIRT) -> None:
+        """Seated arms: shoulder → elbow → blocky hand resting on a key."""
+        if not self.have:
+            return
+        s = PIANO_SCALE
+        aw = ARM_W + 2 * s
+        ph = 2 * s  # knuckle row height
+        for i, (hx, hy, fingers, pitch) in enumerate(targets):
+            sx = cx + (-1 if i == 0 else 1) * (TORSO_W * s // 2 + aw // 2)
+            sy = cy + 2 * s
+            # sleeve covers most of the reach; only a short wrist drop onto the keys
+            ex = int(sx + (hx - sx) * 0.7)
+            ey = int(sy + (hy - sy) * 0.5)
+            self._bar(scr, (sx, sy), (ex, ey), aw, shirt)
+            self._bar(scr, (ex, ey), (hx, hy - ph - s), aw, SKIN)
+            scr.rect(ex - aw // 2, ey - aw // 2, aw, aw, NIGHT)
+            scr.rect(ex - aw // 2 + 1, ey - aw // 2 + 1, aw - 2, aw - 2, shirt)
+            # narrow back of hand over a wider knuckle row reads as a hand, not a plank
+            fw = max(2, pitch - 4 * s)  # leave a clear gap between fingers
+            kn_w = fingers[-1][0] - fingers[0][0] + fw
+            back_w = max(fw, kn_w - 2 * pitch)
+            scr.rect(hx - back_w // 2 - 1, hy - ph - 2 * s - 1, back_w + 2, 2 * s + 2, NIGHT)
+            scr.rect(hx - back_w // 2, hy - ph - 2 * s, back_w, 2 * s, SKIN)
+            scr.rect(hx - kn_w // 2 - 1, hy - ph - 1, kn_w + 2, ph + 2, NIGHT)
+            scr.rect(hx - kn_w // 2, hy - ph, kn_w, ph, SKIN)
+            scr.rect(hx - kn_w // 2, hy - ph, kn_w, s, SKIN_LT)
+            # one finger per key; the pressed one reaches deeper into its key
+            for fi, (fx, press) in enumerate(fingers):
+                fl = 5 * s + (0, 1, 2, 1, 0)[fi] * s // 2 + int(press * 2 * s)
+                scr.rect(fx - fw // 2 - 1, hy - 1, fw + 2, fl + 2, NIGHT)
+                scr.rect(fx - fw // 2, hy, fw, fl, SKIN)
+                scr.rect(fx - fw // 2, hy + fl - s, fw, s, SKIN_DK)
 
     def _blit_head(self, scr: PixelScreen, hx: int, hy: int, scale: int, rows=None) -> None:
         rows = HEAD if rows is None else rows

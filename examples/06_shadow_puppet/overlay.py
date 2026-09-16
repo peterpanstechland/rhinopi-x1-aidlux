@@ -35,7 +35,7 @@ from pixel_ui import (
     pixel_ring,
 )
 from pose_tracker import PoseResult
-from scenes import AV_SH_Y, AV_X, STAGE_H, Stage, accent_of
+from scenes import AV_SH_Y, AV_X, GROUND, STAGE_H, Stage, accent_of
 
 STICK = (
     (11, 12),
@@ -349,18 +349,25 @@ def draw_screen(
             stage.draw_bg(scr)
             ax = AV_X + int(stage.avatar_dx)
             ay = AV_SH_Y + int(stage.avatar_dy)
-            if stage.scene == "eagle":
-                stage.draw_wings(scr, ax, ay)
             puppet.face = "happy" if stage.done else ("tired" if getattr(stage, "falling", False) else "idle")
-            puppet.draw(
-                scr,
-                ax,
-                ay,
-                accent_of(game.scene),
-                style=stage.scene,
-                nod=motion.nod,
-                turn_dir=motion.turn_dir,
-            )
+            if stage.scene == "piano":
+                # sit behind the keyboard; shoulders just above the fallboard
+                ay = GROUND - 52
+                puppet.draw(scr, ax, ay, accent_of(game.scene), style="piano")
+                stage.draw_piano_keys(scr)
+                puppet.draw_piano_arms(scr, ax, ay, stage.piano_hand_targets(scr))
+            else:
+                puppet.draw(
+                    scr,
+                    ax,
+                    ay,
+                    accent_of(game.scene),
+                    style=stage.scene,
+                    nod=motion.nod,
+                    turn_dir=motion.turn_dir,
+                )
+                if stage.scene == "eagle":
+                    stage.draw_wings(scr, ax, ay)
             stage.draw_fg(scr)
             if game.sub == READY:
                 ready_card(scr, game.act, game.act_i, len(game.acts), game.t_state)
