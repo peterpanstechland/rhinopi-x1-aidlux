@@ -11,11 +11,10 @@ venv/
 *.ctx.bin
 *.tar.gz
 *.zip
-docs/images/*.png
-docs/images/*.jpg
-docs/images/*.jpeg
-docs/images/*.webp
-!docs/images/.gitkeep
+docs/images/063baf01553ab40fe2c07fd941d9a3ba.jpg
+docs/images/067b423bc51e86ba10d7ed49c27bdbe0.jpg
+docs/images/4e9ee2e036dfbc8614ec7244af43dff7.jpg
+docs/images/d93e1066452df04b05f3b5458e1d7d4c.jpg
 .vscode/
 .idea/
 examples/06_shadow_puppet/save.json
