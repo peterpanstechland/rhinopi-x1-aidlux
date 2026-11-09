@@ -16,7 +16,7 @@ sys.path.insert(0, str(ROOT / "usb_camera"))
 sys.path.insert(0, str(ROOT / "06_shadow_puppet"))
 
 from camera import open_usb  # noqa: E402
-from game import JpegHub, start_http  # noqa: E402
+from desk_http import JpegHub, start_http  # noqa: E402
 from pose_tracker import PoseTracker, draw_skeleton  # noqa: E402
 
 
@@ -35,15 +35,21 @@ def main() -> int:
     tracker = PoseTracker(accel=args.accel, full_body=True)
     cap = open_usb(args.index, args.width, args.height)
     hub = JpegHub()
-    if not args.no_web:
-        start_http(hub, "0.0.0.0", args.port)
-        print(f"open  http://192.168.88.216:{args.port}/", flush=True)
+    server = None if args.no_web else start_http(hub, None, "0.0.0.0", args.port)
+    if server:
+        print(f"HTTP listening on 0.0.0.0:{server.server_port}", flush=True)
     t_end = time.perf_counter() + args.seconds if args.seconds else None
     last = None
     try:
         while True:
             ok, frame = cap.read()
-            if not ok:
+            if not ok or frame is None:
+                if t_end and time.perf_counter() >= t_end:
+                    if last is None:
+                        print("No camera frames received.", file=sys.stderr)
+                        return 1
+                    break
+                time.sleep(0.05)
                 continue
             frame = cv2.flip(frame, 1)
             pose = tracker.infer(frame)
@@ -65,6 +71,9 @@ def main() -> int:
     except KeyboardInterrupt:
         print("stop")
     finally:
+        if server:
+            server.shutdown()
+            server.server_close()
         cap.release()
         if args.save and last is not None:
             Path(args.save).parent.mkdir(parents=True, exist_ok=True)

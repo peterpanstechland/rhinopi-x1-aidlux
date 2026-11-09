@@ -1,19 +1,20 @@
 #!/usr/bin/env python3
-"""Upper-body gestures that work in a desk webcam crop."""
+"""Upper-body gestures in mirrored screen coordinates, scaled to shoulder width."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 
 import numpy as np
 
 from pose_tracker import PoseResult
 
 
-def _p(pose: PoseResult, idx: int, min_vis: float = 0.12):
-    if not pose.ok or idx >= len(pose.xy) or pose.vis[idx] < min_vis:
+def _p(pose: PoseResult, idx: int, min_vis: float = 0.25):
+    if not pose.ok or idx >= min(len(pose.xy), len(pose.vis)) or not pose.vis[idx] >= min_vis:
         return None
-    return pose.xy[idx]
+    point = pose.xy[idx]
+    return point if np.isfinite(point).all() else None
 
 
 def _mid(a, b):
@@ -25,17 +26,17 @@ def _mid(a, b):
 @dataclass
 class Motion:
     wings: float = 0.0
-    wing_l: float = 0.0  # left arm T-pose quality 0..1
+    wing_l: float = 0.0
     wing_r: float = 0.0
     flap: float = 0.0
     wave: float = 0.0
     lean: float = 0.0
     lean_dir: float = 0.0
     piano: float = 0.0
-    piano_lx: float = 0.35  # 0..1 across the keyboard
+    piano_lx: float = 0.35
     piano_rx: float = 0.65
     hands_up: float = 0.0
-    jump: float = 0.0  # 1-frame pulse
+    jump: float = 0.0
     jump_armed: bool = True
     turn: float = 0.0
     turn_dir: float = 0.0
@@ -45,209 +46,205 @@ class Motion:
     piano_side: str = ""
     nod_count: int = 0
     wave_side: float = 0.0
+    flap_beat: bool = False
+    shoulders_seen: bool = False
+    face_seen: bool = False
+    wrist_count: int = 0
+
+
+@dataclass
+class Stroke:
+    """Emit a direction only after moving a minimum distance from the last extreme."""
+    extreme: float | None = None
+    direction: int = 0
+
+    def reset(self) -> None:
+        self.extreme = None
+        self.direction = 0
+
+    def update(self, value: float, distance: float) -> int:
+        if self.extreme is None:
+            self.extreme = value
+            return 0
+        delta = value - self.extreme
+        if self.direction >= 0 and delta <= -distance:
+            self.direction = -1
+        elif self.direction <= 0 and delta >= distance:
+            self.direction = 1
+        else:
+            if delta * self.direction > 0:
+                self.extreme = value
+            return 0
+        self.extreme = value
+        return self.direction
 
 
 @dataclass
 class GestureTracker:
     prev_l: np.ndarray | None = None
     prev_r: np.ndarray | None = None
-    prev_nose: np.ndarray | None = None
     prev_mid_y: float | None = None
-    flap_e: float = 0.0
-    wave_e: float = 0.0
-    piano_e: float = 0.0
-    nod_e: float = 0.0
-    last_up: str = ""
-    nod_count: int = 0
-    nod_armed: bool = True
     jump_armed: bool = True
-    nod_down: float = 0.0
-    flap_dir: float = 0.0
-    prev_wy: float | None = None
-    lean_e: float = 0.0  # smoothed ski lean (-1..1)
-    home_sh_x: float | None = None  # slow shoulder baseline for chair-shift
-    turn_e: float = 0.0  # smoothed head yaw (-1..1)
+    nod_count: int = 0
+    jump_home_y: float | None = None
+    nod_dipped: bool = False
+    flap_lifted: bool = False
+    nod_stroke: Stroke = field(default_factory=Stroke)
+    flap_extrema: tuple[float, float] | None = None
+    wave_strokes: tuple[Stroke, Stroke] = field(default_factory=lambda: (Stroke(), Stroke()))
+    piano_strokes: tuple[Stroke, Stroke] = field(default_factory=lambda: (Stroke(), Stroke()))
+    lean_e: float = 0.0
+    home_sh_x: float | None = None
+    turn_e: float = 0.0
 
-    def update(self, pose: PoseResult) -> Motion:
-        l_sh, r_sh = _p(pose, 11), _p(pose, 12)
-        l_wr, r_wr = _p(pose, 15), _p(pose, 16)
-        l_hip, r_hip = _p(pose, 23), _p(pose, 24)
-        nose = _p(pose, 0)
-        mid_sh = _mid(l_sh, r_sh)
-        mid_hip = _mid(l_hip, r_hip)
-        m = Motion()
-        if mid_sh is None or l_wr is None or r_wr is None or l_sh is None or r_sh is None:
-            self.prev_l = l_wr
-            self.prev_r = r_wr
-            self.prev_nose = nose
-            self.prev_mid_y = None
-            # hold last lean / turn so a flicker doesn't snap to center
-            m.lean_dir = float(np.clip(self.lean_e, -1.0, 1.0))
-            m.lean = abs(m.lean_dir)
-            m.turn_dir = float(np.clip(self.turn_e, -1.0, 1.0))
-            m.turn = abs(m.turn_dir)
-            return m
-        sh_w = float(np.linalg.norm(r_sh - l_sh)) + 1e-3
-        span = float(abs(r_wr[0] - l_wr[0])) / sh_w
-        m.span = span
-        # per-arm T-pose: reach out + stay near shoulder height
-        l_reach = float((l_sh[0] - l_wr[0]) / sh_w)  # left wrist further left
-        r_reach = float((r_wr[0] - r_sh[0]) / sh_w)
-        l_lvl = 1.0 - abs(float(l_wr[1] - l_sh[1])) / (sh_w * 0.75)
-        r_lvl = 1.0 - abs(float(r_wr[1] - r_sh[1])) / (sh_w * 0.75)
-        m.wing_l = float(np.clip(l_reach / 0.85, 0.0, 1.0) * np.clip(l_lvl, 0.25, 1.0))
-        m.wing_r = float(np.clip(r_reach / 0.85, 0.0, 1.0) * np.clip(r_lvl, 0.25, 1.0))
-        m.wings = float(min(m.wing_l, m.wing_r))
-        mid_y = (l_wr[1] + r_wr[1]) * 0.5
-        if abs(mid_y - mid_sh[1]) > sh_w * 1.1:
-            m.wings *= 0.45
-            m.wing_l *= 0.45
-            m.wing_r *= 0.45
-        # wrist X across the keyboard — every key must stay reachable
-        mid_x = float(mid_sh[0])
-        m.piano_lx = float(np.clip((l_wr[0] - mid_x) / (sh_w * 2.6) + 0.5, 0.03, 0.97))
-        m.piano_rx = float(np.clip((r_wr[0] - mid_x) / (sh_w * 2.6) + 0.5, 0.03, 0.97))
-        # keep left visually left of right on the keyboard
-        if m.piano_lx > m.piano_rx:
-            m.piano_lx, m.piano_rx = m.piano_rx, m.piano_lx
+    def _reset_head(self) -> None:
+        self.nod_stroke.reset()
+        self.nod_dipped = False
+        self.lean_e = self.turn_e = 0.0
+        self.home_sh_x = None
 
-        # hands_up: average wrist height vs shoulders (desk-friendly)
-        l_el, r_el = _p(pose, 13), _p(pose, 14)
-        avg_wr_y = float((l_wr[1] + r_wr[1]) * 0.5)
-        clear = float(mid_sh[1] - avg_wr_y)
-        m.hands_up = float(np.clip(clear / (sh_w * 0.40), 0.0, 1.0))
-        if clear < -sh_w * 0.15:
-            m.hands_up = 0.0
-        # elbows up also counts (wrists often clipped at frame top)
-        if l_el is not None and r_el is not None:
-            el_avg = float((l_el[1] + r_el[1]) * 0.5)
-            el_up = float(np.clip((mid_sh[1] - el_avg) / (sh_w * 0.35), 0.0, 1.0))
-            m.hands_up = float(max(m.hands_up, el_up * 0.9))
-
-        # JUMP (dino): chair bounce — shoulders rise as a whole.
-        # Deliberately NOT "arms flap" so it won't feel like eagle.
-        both_rising = False
-        if self.prev_l is not None and self.prev_r is not None:
-            up_l = float(self.prev_l[1] - l_wr[1])
-            up_r = float(self.prev_r[1] - r_wr[1])
-            both_rising = up_l > 8 and up_r > 8
-        hop = False
-        if self.prev_mid_y is not None:
-            hop = (self.prev_mid_y - float(mid_sh[1])) > sh_w * 0.055
-        # backup: fists near torso then push up once (arms close, not T-pose)
-        arms_in = span < 1.55
-        power_up = arms_in and both_rising and m.hands_up >= 0.18
-        if self.jump_armed and (hop or power_up):
-            m.jump = 1.0
-            self.jump_armed = False
-        elif (not hop) and m.hands_up < 0.08 and (
-            self.prev_mid_y is None
-            or abs(self.prev_mid_y - float(mid_sh[1])) < sh_w * 0.025
-        ):
-            self.jump_armed = True
-
-        # SKI lean: prefer head vs shoulders (stable at desk). Old fallback used
-        # shoulder height tilt and snapped to 0 whenever pose flickered.
-        raw_lean = 0.0
-        if nose is not None:
-            raw_lean = float((nose[0] - mid_sh[0]) / (sh_w * 0.42))
+    def _head(self, m: Motion, pose: PoseResult, nose, mid_sh, mid_hip, sh_w: float) -> None:
+        if nose is None:
+            self._reset_head()
+            return
+        m.face_seen = True
+        raw_lean = (nose[0] - mid_sh[0]) / (sh_w * .42)
         if mid_hip is not None:
-            torso = float((mid_sh[0] - mid_hip[0]) / (sh_w * 0.55))
-            raw_lean = 0.75 * raw_lean + 0.25 * torso if nose is not None else torso
-        # whole-chair shift: shoulder mid vs slow home position
+            torso = (mid_sh[0] - mid_hip[0]) / (sh_w * .55)
+            raw_lean = .75 * raw_lean + .25 * torso
         if self.home_sh_x is None:
             self.home_sh_x = float(mid_sh[0])
-        else:
-            self.home_sh_x = 0.97 * self.home_sh_x + 0.03 * float(mid_sh[0])
-        shift = float((mid_sh[0] - self.home_sh_x) / (sh_w * 0.85))
-        raw_lean = float(np.clip(0.7 * raw_lean + 0.3 * shift, -1.35, 1.35))
-        # EMA + deadzone — kills center twitch at ~10 FPS
-        self.lean_e = 0.78 * self.lean_e + 0.22 * raw_lean
-        shown = self.lean_e if abs(self.lean_e) >= 0.10 else 0.0
-        m.lean_dir = float(np.clip(shown, -1.0, 1.0))
+        self.home_sh_x = .97 * self.home_sh_x + .03 * float(mid_sh[0])
+        shift = (mid_sh[0] - self.home_sh_x) / (sh_w * .85)
+        self.lean_e = .78 * self.lean_e + .22 * float(np.clip(.7 * raw_lean + .3 * shift, -1.35, 1.35))
+        m.lean_dir = float(np.clip(self.lean_e, -1, 1)) if abs(self.lean_e) >= .1 else 0.0
         m.lean = abs(m.lean_dir)
 
-        # TURN: ears + nose. Shoulder-only yaw dies when the torso follows the head
-        # (common on a right look). Screen-right = 右转.
-        l_ear, r_ear = _p(pose, 7, 0.08), _p(pose, 8, 0.08)
-        raw_turn = 0.0
-        if nose is not None:
-            raw_turn = float((nose[0] - mid_sh[0]) / (sh_w * 0.38))
-        if nose is not None and l_ear is not None and r_ear is not None:
-            ear_w = abs(float(r_ear[0] - l_ear[0])) + 1e-3
-            ear_mid = (float(l_ear[0]) + float(r_ear[0])) * 0.5
-            yaw = (float(nose[0]) - ear_mid) / max(ear_w * 0.45, sh_w * 0.10)
-            near = (
-                abs(float(nose[0]) - float(l_ear[0])) - abs(float(nose[0]) - float(r_ear[0]))
-            ) / max(ear_w, 1.0)
-            raw_turn = 0.6 * yaw + 0.4 * near
-        elif nose is not None and l_ear is not None and r_ear is None:
-            # only screen-left ear visible → looking screen-right
-            raw_turn = max(raw_turn, 0.72)
-        elif nose is not None and r_ear is not None and l_ear is None:
-            raw_turn = min(raw_turn, -0.72)
-        self.turn_e = 0.72 * self.turn_e + 0.28 * float(np.clip(raw_turn, -1.4, 1.4))
-        m.turn_dir = float(np.clip(self.turn_e, -1.0, 1.0))
+        left_ear, right_ear = _p(pose, 7, .12), _p(pose, 8, .12)
+        yaw = (nose[0] - mid_sh[0]) / (sh_w * .38)
+        if left_ear is not None and right_ear is not None:
+            ear_w = abs(right_ear[0] - left_ear[0])
+            ear_mid = (right_ear[0] + left_ear[0]) * .5
+            offset = (nose[0] - ear_mid) / max(ear_w * .45, sh_w * .10)
+            near = (abs(nose[0] - left_ear[0]) - abs(nose[0] - right_ear[0])) / max(ear_w, 1)
+            yaw = .6 * offset + .4 * near
+        # With a single visible ear, nose offset still measures direction; disappearance alone is not a turn.
+        self.turn_e = .72 * self.turn_e + .28 * float(np.clip(yaw, -1.4, 1.4))
+        m.turn_dir = float(np.clip(self.turn_e, -1, 1))
         m.turn = abs(m.turn_dir)
-        if self.prev_l is not None and self.prev_r is not None:
-            vl = float(np.linalg.norm(l_wr - self.prev_l))
-            vr = float(np.linalg.norm(r_wr - self.prev_r))
-            m.energy = (vl + vr) / sh_w
-            self.wave_e = 0.65 * self.wave_e + 0.35 * min(1.6, (vl + vr) / (sh_w * 0.35))
-            dx = (l_wr[0] - self.prev_l[0]) + (r_wr[0] - self.prev_r[0])
-            m.wave_side = float(np.clip(dx / (sh_w * 0.25), -1.0, 1.0))
-            # flap: wrist vertical motion — works for T-pose and V-pose
-            wy = float((l_wr[1] + r_wr[1]) * 0.5)
-            dy = abs((l_wr[1] - self.prev_l[1]) + (r_wr[1] - self.prev_r[1])) / 2
-            self.flap_e = 0.35 * self.flap_e + 0.65 * min(1.7, dy / (sh_w * 0.10))
-            if self.prev_wy is not None:
-                dwy = self.prev_wy - wy  # >0 arms rising
-                if self.flap_dir <= 0 and dwy > sh_w * 0.035:
-                    self.flap_e = min(1.7, self.flap_e + 0.55)
-                elif self.flap_dir >= 0 and dwy < -sh_w * 0.035:
-                    self.flap_e = min(1.7, self.flap_e + 0.45)
-                self.flap_dir = 1.0 if dwy > 0 else (-1.0 if dwy < 0 else self.flap_dir)
-            self.prev_wy = wy
-            up_l = l_wr[1] < r_wr[1] - 18
-            up_now = "l" if up_l else "r"
-            if up_now != self.last_up and abs(l_wr[1] - r_wr[1]) > 22:
-                self.piano_e = min(1.4, self.piano_e + 0.35)
-                self.last_up = up_now
-            else:
-                self.piano_e *= 0.92
-            m.piano_side = self.last_up
-        # don't multiply by wings — V-flap must still register
-        m.flap = float(np.clip(self.flap_e, 0.0, 1.0))
-        if self.prev_nose is not None and nose is not None:
-            # Low-FPS friendly: accumulate a downward dip, count when it reverses
-            # (or on one big down step if a whole nod lands in a single frame).
-            dy = float(nose[1] - self.prev_nose[1])
-            floor = max(5.0, sh_w * 0.04)
-            self.nod_e = 0.25 * self.nod_e + 0.75 * min(1.8, abs(dy) / floor)
-            if dy > 0.0:
-                self.nod_down += dy
-            if self.nod_armed and dy >= floor * 1.1:
-                # one chunky down frame ≈ a nod at ~6 FPS
-                self.nod_count += 1
-                self.nod_armed = False
-                self.nod_down = 0.0
-            elif self.nod_armed and dy <= 0.0 and self.nod_down >= floor:
-                self.nod_count += 1
-                self.nod_armed = False
-                self.nod_down = 0.0
-            elif (not self.nod_armed) and dy <= -floor * 0.2:
-                self.nod_armed = True
-                self.nod_down = 0.0
-            elif dy < 0.0 and self.nod_armed:
-                self.nod_down = max(0.0, self.nod_down + dy * 0.5)
+
+        # Nose relative to shoulders rejects a whole-body bounce. Score on the return up.
+        depth = float((nose[1] - mid_sh[1]) / sh_w)
+        direction = self.nod_stroke.update(depth, .065)
+        if direction == 1:
+            self.nod_dipped = True
+        elif direction == -1 and self.nod_dipped:
+            self.nod_count += 1
+            self.nod_dipped = False
+            m.nod = 1.0
         m.nod_count = self.nod_count
-        m.wave = float(np.clip(self.wave_e, 0.0, 1.0))
-        m.piano = float(np.clip(self.piano_e, 0.0, 1.0))
-        m.nod = float(np.clip(self.nod_e, 0.0, 1.0))
-        m.jump_armed = self.jump_armed
-        # flap already set above; keep a floor if only wings moved
-        if m.flap <= 0.0:
-            m.flap = float(np.clip(self.flap_e, 0.0, 1.0))
-        self.prev_l, self.prev_r, self.prev_nose = l_wr, r_wr, nose
+
+    def _wave(self, m: Motion, l_wr, r_wr, mid_sh, sh_w: float) -> None:
+        for wrist, stroke in zip((l_wr, r_wr), self.wave_strokes):
+            if wrist is None or wrist[1] > mid_sh[1] + .20 * sh_w:
+                stroke.reset()
+                continue
+            offset = float((wrist[0] - mid_sh[0]) / sh_w)
+            direction = stroke.update(offset, .15)
+            if direction:
+                m.wave_side = float(direction)
+                m.wave = 1.0
+
+    def update(self, pose: PoseResult, frame_shape=None) -> Motion:
+        if pose.ok and frame_shape is not None:
+            height, width = frame_shape[:2]
+            x, y = pose.xy.T
+            inside = (x >= 0) & (x < width) & (y >= 0) & (y < height)
+            pose = replace(pose, vis=np.where(inside, pose.vis, 0))
+        l_sh, r_sh = _p(pose, 11), _p(pose, 12)
+        l_wr, r_wr = _p(pose, 15), _p(pose, 16)
+        mid_sh = _mid(l_sh, r_sh)
+        m = Motion(nod_count=self.nod_count)
+        sh_w = float(np.linalg.norm(r_sh - l_sh)) if mid_sh is not None else 0.0
+        if sh_w < 8:
+            self._reset_head()
+            self.flap_extrema = None
+            self.flap_lifted = False
+            for stroke in (*self.wave_strokes, *self.piano_strokes):
+                stroke.reset()
+            self.prev_l = self.prev_r = self.prev_mid_y = None
+            self.jump_home_y = None
+            self.jump_armed = True
+            return m
+        m.shoulders_seen = True
+        m.wrist_count = int(l_wr is not None) + int(r_wr is not None)
+        self._head(m, pose, _p(pose, 0), mid_sh, _mid(_p(pose, 23), _p(pose, 24)), sh_w)
+        self._wave(m, l_wr, r_wr, mid_sh, sh_w)
+        previous_y = self.prev_mid_y
         self.prev_mid_y = float(mid_sh[1])
+        rise = (previous_y - self.prev_mid_y) / sh_w if previous_y is not None else 0.0
+        for side, wrist, prev, stroke in zip(("l", "r"), (l_wr, r_wr), (self.prev_l, self.prev_r), self.piano_strokes):
+            if wrist is None:
+                stroke.reset()
+                continue
+            if prev is not None:
+                m.energy += float(np.linalg.norm(wrist - prev)) / sh_w
+            key_x = float(np.clip((wrist[0] - mid_sh[0]) / (sh_w * 2.6) + .5, .03, .97))
+            if side == "l":
+                m.piano_lx = key_x
+            else:
+                m.piano_rx = key_x
+            if stroke.update(float((wrist[1] - mid_sh[1]) / sh_w), .10) == 1 and not m.piano_side:
+                m.piano, m.piano_side = 1.0, side
+
+        power_up = False
+        if l_wr is not None and r_wr is not None:
+            m.span = float(abs(r_wr[0] - l_wr[0])) / sh_w
+            l_reach = float((l_sh[0] - l_wr[0]) / sh_w)
+            r_reach = float((r_wr[0] - r_sh[0]) / sh_w)
+            l_lvl = 1.0 - abs(float(l_wr[1] - l_sh[1])) / (sh_w * 0.75)
+            r_lvl = 1.0 - abs(float(r_wr[1] - r_sh[1])) / (sh_w * 0.75)
+            m.wing_l = float(np.clip(l_reach / .85, 0, 1) * np.clip(l_lvl, .25, 1))
+            m.wing_r = float(np.clip(r_reach / .85, 0, 1) * np.clip(r_lvl, .25, 1))
+            m.wings = min(m.wing_l, m.wing_r)
+            mid_y = (l_wr[1] + r_wr[1]) * 0.5
+            if abs(mid_y - mid_sh[1]) > sh_w * 1.1:
+                m.wings *= 0.45
+                m.wing_l *= 0.45
+                m.wing_r *= 0.45
+            # Both wrists must clear shoulder height for the two-hand launch.
+            m.hands_up = float(np.clip(min(l_sh[1] - l_wr[1], r_sh[1] - r_wr[1]) / (sh_w * .40), 0, 1))
+            if self.prev_l is not None and self.prev_r is not None:
+                delta_l = (l_wr[1] - self.prev_l[1]) / sh_w + rise
+                delta_r = (r_wr[1] - self.prev_r[1]) / sh_w + rise
+                power_up = m.span < 1.55 and max(delta_l, delta_r) < -.04 and m.hands_up >= .18
+                if delta_l * delta_r > 0:
+                    m.flap = float(np.clip(min(abs(delta_l), abs(delta_r)) / .12, 0, 1))
+            if min(l_reach, r_reach) > .30:
+                # Each wing travels the full distance on each half of the same beat.
+                heights = ((l_wr[1] - l_sh[1]) / sh_w, (r_wr[1] - r_sh[1]) / sh_w)
+                old = self.flap_extrema or heights
+                extreme = min if self.flap_lifted else max
+                self.flap_extrema = tuple(extreme(a, b) for a, b in zip(old, heights))
+                direction = 1 if self.flap_lifted else -1
+                if m.flap > .03 and all(direction * (h - peak) >= .18 for h, peak in zip(heights, self.flap_extrema)):
+                    m.flap_beat = self.flap_lifted
+                    self.flap_lifted = not self.flap_lifted
+                    self.flap_extrema = heights
+            else:
+                self.flap_extrema = None
+                self.flap_lifted = False
+        else:
+            self.flap_extrema = None
+            self.flap_lifted = False
+
+        if self.jump_armed and (rise > .055 or power_up):
+            m.jump = 1.0
+            self.jump_armed = False
+            self.jump_home_y = previous_y if rise > .055 else None
+        elif (self.jump_home_y is None or self.prev_mid_y >= self.jump_home_y - sh_w * .03) and m.hands_up < .08:
+            self.jump_armed = True
+            self.jump_home_y = None
+        m.jump_armed = self.jump_armed
+        self.prev_l, self.prev_r = l_wr, r_wr
         return m

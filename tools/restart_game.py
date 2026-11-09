@@ -3,29 +3,10 @@ from __future__ import annotations
 
 import shlex
 import sys
-import time
-from pathlib import Path
 
 import paramiko
 
-ROOT = Path(__file__).resolve().parents[1]
-FILES = [
-    "examples/06_shadow_puppet/game.py",
-    "examples/06_shadow_puppet/gestures.py",
-    "examples/06_shadow_puppet/overlay.py",
-    "examples/06_shadow_puppet/loop.py",
-    "examples/06_shadow_puppet/scenes.py",
-    "examples/06_shadow_puppet/posture.py",
-    "examples/06_shadow_puppet/puppet.py",
-    "examples/06_shadow_puppet/hand_tracker.py",
-    "examples/06_shadow_puppet/pixel_ui.py",
-    "examples/06_shadow_puppet/stats.py",
-    "examples/06_shadow_puppet/test_loop.py",
-    "examples/06_shadow_puppet/render_probe.py",
-    "examples/06_shadow_puppet/README.md",
-    "examples/04_mediapipe/pose_tracker.py",
-]
-EXTRA_ARGS = [a for a in sys.argv[1:]]
+from deploy_game import run_remote, upload_game
 
 
 def main() -> int:
@@ -39,22 +20,35 @@ def main() -> int:
         allow_agent=False,
         look_for_keys=False,
     )
-    sftp = client.open_sftp()
-    for rel in FILES:
-        sftp.put(str(ROOT / rel), f"rhinopi-lab/{rel}")
-        print("uploaded", rel)
-    sftp.close()
-    client.exec_command("pkill -9 -f '06_shadow_puppet/game.py' || true", timeout=10)
-    time.sleep(2.0)
-    argv = ["python3", "/home/aidlux/rhinopi-lab/examples/06_shadow_puppet/game.py", "--port", "8090"]
-    argv += EXTRA_ARGS
-    cmd = " ".join(shlex.quote(a) for a in argv)
-    launch = f"setsid nohup {cmd} > /tmp/puppet.log 2>&1 < /dev/null & echo started $!"
-    _, stdout, stderr = client.exec_command(launch, timeout=20)
-    sys.stdout.write(stdout.read().decode())
-    sys.stderr.write(stderr.read().decode())
-    client.close()
-    return 0
+    try:
+        upload_game(client)
+        # The bracketed pattern keeps the stop command from matching its own shell.
+        stop = "pkill -TERM -f '[0]6_shadow_puppet/game.py'"
+        rc = run_remote(client, stop, timeout=10)
+        if rc not in (0, 1):
+            return rc
+        argv = [
+            "python3", "/home/aidlux/rhinopi-lab/examples/06_shadow_puppet/game.py",
+            "--port", "8090", *sys.argv[1:],
+        ]
+        cmd = shlex.join(argv)
+        ready = "sit interval " if "--no-web" in argv else "HTTP listening on "
+        launch = f"""
+            : > /tmp/puppet.log || exit 1
+            setsid nohup {cmd} >> /tmp/puppet.log 2>&1 < /dev/null &
+            pid=$!
+            for i in $(seq 1 60); do
+                if ! kill -0 "$pid" 2>/dev/null; then cat /tmp/puppet.log; exit 1; fi
+                if grep -q '^{ready}' /tmp/puppet.log; then echo "started $pid"; exit 0; fi
+                sleep 1
+            done
+            tail -n 20 /tmp/puppet.log
+            echo "Game startup was not confirmed within 60 seconds." >&2
+            exit 1
+        """
+        return run_remote(client, launch, timeout=75)
+    finally:
+        client.close()
 
 
 if __name__ == "__main__":

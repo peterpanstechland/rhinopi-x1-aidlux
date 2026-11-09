@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import random
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -41,7 +42,7 @@ ACTS = (
         "scene": "eagle",
         "name": "老鹰",
         "en": "EAGLE",
-        "tip": "双臂平举成鸟翅再上下扇；云往下冲就是飞起来了",
+        "tip": "双臂向两侧展开，一起抬高再压低，完成一次扇翅",
         "goal": "展翅扇动 8 次飞到旗子",
         "kind": "reps",
         "need": 8,
@@ -51,7 +52,7 @@ ACTS = (
         "scene": "wave",
         "name": "挥手",
         "en": "WAVE",
-        "tip": "抬手左右挥，月台上的人会跟你挥回来",
+        "tip": "抬一只手到肩高，连续左右挥动，每次换向送走一人",
         "goal": "挥手送走 10 个人",
         "kind": "reps",
         "need": 10,
@@ -61,7 +62,7 @@ ACTS = (
         "scene": "ski",
         "name": "滑雪",
         "en": "SKI",
-        "tip": "头往左右偏（像看两边），小人就会滑过去碰旗",
+        "tip": "面朝前，头和上身向旗子那侧偏移，绕开树",
         "goal": "碰到 6 面旗",
         "kind": "reps",
         "need": 6,
@@ -71,7 +72,7 @@ ACTS = (
         "scene": "piano",
         "name": "弹琴",
         "en": "PIANO",
-        "tip": "十指落在十个键上，哪个键亮就抬那根手指按一下",
+        "tip": "张开双手，向下按黄键对应的手指，再抬起来",
         "goal": "按中 8 个黄键",
         "kind": "reps",
         "need": 8,
@@ -82,7 +83,7 @@ ACTS = (
         "scene": "dino",
         "name": "跳跃",
         "en": "JUMP",
-        "tip": "坐着把身子往上颠一下跳过；不用挥翅膀",
+        "tip": "仙人掌靠近时坐着轻挺上身，落回坐姿再起跳",
         "goal": "跳过 5 个仙人掌",
         "kind": "reps",
         "need": 5,
@@ -102,7 +103,7 @@ ACTS = (
         "scene": "nod",
         "name": "点头",
         "en": "NOD",
-        "tip": "轻轻上下点头就行，不用幅度很大",
+        "tip": "保持双肩稳定，低头再抬回正中，完成一次点头",
         "goal": "点头 6 次",
         "kind": "reps",
         "need": 6,
@@ -181,6 +182,7 @@ class DeskGame:
     results: list = field(default_factory=list)
     round_score: int = 0
     round_time: float = 0.0
+    round_ended_at: int = 0
     trans: float = 0.0
     toast: str = ""
     toast_t: float = 0.0
@@ -305,10 +307,26 @@ class DeskGame:
             "streak": self.streak,
             "level": self.title,
             "act": self.act["name"] if self.phase == ROUND else "",
+            "act_id": self.act["id"] if self.phase == ROUND else "",
+            "act_goal": self.act["goal"] if self.phase == ROUND else "",
             "act_i": self.act_i,
             "round_len": self.round_len,
             "round_left": round(self.round_left, 1) if self.phase == ROUND else 0.0,
             "cleared": self.done_n,
+            "round_time": round(self.round_time, 1),
+            "round_score": self.round_score,
+            "round_ended_at": self.round_ended_at,
+            "results": [
+                {
+                    "id": result.act["id"],
+                    "name": result.act["name"],
+                    "cleared": result.cleared,
+                    "seconds": round(result.seconds, 1),
+                    "grade": result.grade,
+                    "points": result.points,
+                }
+                for result in self.results
+            ],
             "posture_avg": round(self.posture_mean, 1),
             "posture_grade": self.posture_grade,
         }
@@ -383,6 +401,7 @@ class DeskGame:
         self.results = []
         self.round_score = 0
         self.round_time = 0.0
+        self.round_ended_at = 0
         self.combo = 0
         self.trans = 0.55
         self.early_hold = 0.0
@@ -438,6 +457,7 @@ class DeskGame:
         self.sit_s = 0.0
         self.hp_pool = 100.0
         self.phase = SUMMARY
+        self.round_ended_at = time.time_ns() // 1_000_000
         self.t_state = 0.0
         self.posture_n = 0
         self.posture_sum = 0.0

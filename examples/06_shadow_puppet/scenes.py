@@ -63,7 +63,6 @@ FINGERS_PER_HAND = 5
 PIANO_KEYS = FINGERS_PER_HAND * 2
 PIANO_KEY_W = 14  # sized so one hand spans its five keys
 PIANO_DIP = 0.16  # fingertip dip below the hand average that counts as a press
-HAND_FRAME_W = 1280.0  # hand landmarks come back in full-frame pixels
 
 # eagle flight — alt 0 on ground, ~56 at the flag
 EAGLE_MAX_ALT = 56.0
@@ -134,6 +133,12 @@ class Stage:
         self.left_fill = 0.0
         self.right_fill = 0.0
         self.gust_t = 0.0
+        self.tracking = False
+        self.piano_input = "fingers"
+        self.frame_width = 1280
+        self.feedback = None
+        self.feedback_seq = 0
+        self.feedback_time = 0.0
 
     # ---------- lifecycle ----------
 
@@ -174,6 +179,10 @@ class Stage:
         self.left_fill = 0.0
         self.right_fill = 0.0
         self.gust_t = 0.0
+        self.tracking = False
+        self.feedback = None
+        self.feedback_seq = 0
+        self.feedback_time = 0.0
         self.gates = [self._ski_item(18.0 - i * 34.0) for i in range(4)]
         self._sync_text()
 
@@ -183,16 +192,77 @@ class Stage:
 
     @property
     def frac(self) -> float:
+        if self.scene == "turn":
+            return (self.left_got + self.right_got) / (2 * self.need)
         return min(1.0, self.got / max(self.need, 0.01))
+
+    def challenge_snapshot(self, *, include_visual: bool) -> dict:
+        is_turn = self.scene == "turn"
+        count = self.left_got + self.right_got if is_turn else self.got
+        snapshot = {
+            "frac": round(float(self.frac), 3), "text": self.text,
+            "count": round(float(count), 1) if self.kind == "hold" else int(count),
+            "target": int(self.need * 2 if is_turn else self.need),
+            "unit": {"wings": "秒", "ski": "面", "wave": "人", "piano": "键", "dino": "个"}.get(self.scene, "次"),
+            "tracking": self.tracking, "cue": self.cue(), "feedback": self.feedback,
+        }
+        if self.scene == "piano":
+            snapshot["piano_input"] = self.piano_input
+        if include_visual:
+            snapshot["visual"] = {
+                "target_key": int(self.target_key),
+                "keys_lit": sorted(int(key) for key, light in self.keys_lit.items() if light > 0.3),
+                "gates": [
+                    {"x": round(float(g["x"]), 2), "y": round(float(g["y"]), 2),
+                     "kind": g["kind"], "state": int(g["state"])}
+                    for g in self.gates
+                ],
+                "obs": round(float(self.obs), 2),
+                "avatar_dx": round(float(self.avatar_dx), 2),
+                "avatar_dy": round(float(self.avatar_dy), 2),
+                "alt": round(float(self.alt), 2),
+                "left_fill": round(float(self.left_fill), 3),
+                "right_fill": round(float(self.right_fill), 3),
+                "left_got": int(self.left_got),
+                "right_got": int(self.right_got),
+            }
+        return snapshot
 
     @property
     def done(self) -> bool:
         return self.got >= self.need
 
+    def cue(self) -> str:
+        if not self.tracking:
+            if self.scene == "piano" and self.piano_input == "fingers":
+                return "把双手放进画面，张开手指"
+            if self.scene in ("turn", "nod", "ski"):
+                return "让脸和双肩入镜"
+            if self.scene == "wave":
+                return "让双肩和挥动的手入镜"
+            if self.scene == "dino":
+                return "让双肩入镜"
+            return "让双肩和手腕入镜"
+        if self.scene == "piano" and self.piano_input == "wrists":
+            return "把手腕移到亮键位置，下压再抬起"
+        if self.scene == "turn":
+            if not self.armed:
+                return "回正再转"
+            if self.left_got >= self.need:
+                return "看向屏幕右侧，再回正"
+            if self.right_got >= self.need:
+                return "看向屏幕左侧，再回正"
+        if self.scene == "wings":
+            if self.left_fill < .82 and self.right_fill >= .82:
+                return "将屏幕左侧的手臂向外平举"
+            if self.right_fill < .82 and self.left_fill >= .82:
+                return "将屏幕右侧的手臂向外平举"
+        return self.act["tip"]
+
     def _sync_text(self) -> None:
         if self.kind == "hold":
             if self.scene == "wings":
-                ok = self.left_fill >= 0.85 and self.right_fill >= 0.85
+                ok = self.left_fill >= 0.82 and self.right_fill >= 0.82
                 wind = " 有风！" if self.gust_t > 0 else ""
                 self.text = f"{min(self.got, self.need):.1f}/{self.need:.0f}秒" + (
                     " 撑住！" + wind if ok else " 左右撑满" + wind
@@ -200,9 +270,10 @@ class Stage:
             else:
                 self.text = f"{min(self.got, self.need):.1f} / {self.need:.0f} 秒"
         elif self.scene == "turn":
-            self.text = f"左 {int(self.left_got)} / 右 {int(self.right_got)}  共 {int(self.need)}"
+            self.text = f"左 {int(self.left_got)}/{int(self.need)} · 右 {int(self.right_got)}/{int(self.need)}"
         elif self.scene == "piano":
-            self.text = f"{int(self.got)}/{int(self.need)}  按黄键那根手指"
+            cue = "向下按对应手指" if self.piano_input == "fingers" else "手腕对准黄键下压"
+            self.text = f"{int(self.got)}/{int(self.need)}  {cue}"
         elif self.scene == "eagle":
             if self.falling:
                 cue = "失重下坠！快挥翅"
@@ -218,12 +289,10 @@ class Stage:
                 cue = "跳起来了"
             elif AV_X < self.obs < AV_X + 100:
                 cue = "仙人掌来了快跳！"
-            elif self.hands_up >= 0.20:
-                cue = "放下再举"
-            elif self.hands_up > 0.08:
-                cue = "再举一点"
+            elif not self.jump_ready:
+                cue = "落回坐姿再起跳"
             else:
-                cue = "双手举到肩上→跳"
+                cue = "坐稳，轻挺上身起跳"
             self.text = f"{int(self.got)}/{int(self.need)}  {cue}"
         elif self.scene == "wave":
             if self.done:
@@ -236,9 +305,15 @@ class Stage:
         else:
             self.text = f"{int(self.got)} / {int(self.need)}"
 
-    def _tick(self, n: float = 1.0) -> None:
-        self.got = min(self.need, self.got + n)
+    def _event(self, kind: str, text: str) -> None:
+        self.feedback_seq += 1
+        self.feedback = {"kind": kind, "text": text, "seq": self.feedback_seq}
+        self.feedback_time = .7
+
+    def _tick(self, message: str) -> None:
+        self.got = min(self.need, self.got + 1)
         self.pop = 0.45
+        self._event("hit", message)
 
     # ---------- simulation ----------
 
@@ -251,20 +326,28 @@ class Stage:
         self.jump_flash = max(0.0, self.jump_flash - dt)
         if self.msg_t <= 0:
             self.gate_msg = ""
-        if live:
+        self.feedback_time = max(0, self.feedback_time - dt)
+        if self.feedback_time == 0:
+            self.feedback = None
+        if self.scene in ("turn", "nod", "ski"):
+            self.tracking = motion.face_seen
+        elif self.scene == "piano" and self.piano_input == "fingers":
+            self.tracking = bool(hands and hands.hands)
+        elif self.scene == "dino":
+            self.tracking = motion.shoulders_seen
+        else:
+            required_wrists = 1 if self.scene in ("wave", "piano") else 2
+            self.tracking = motion.shoulders_seen and motion.wrist_count >= required_wrists
+        if live and self.tracking:
             fn = getattr(self, f"_sim_{self.scene}", None)
             if fn is not None:
                 fn(motion, hands, dt)
+        elif not self.tracking:
+            self.feedback = None
+            self.left_fill = self.right_fill = 0
+            self.press_base.clear()
+            self.press_armed.clear()
         self._sync_text()
-
-    def _edge(self, value: float, on: float, off: float) -> bool:
-        """One count per crossing, needs to fall back below `off` to re-arm."""
-        if self.armed and value >= on:
-            self.armed = False
-            return True
-        if value <= off:
-            self.armed = True
-        return False
 
     def _sim_wings(self, motion: Motion, hands, dt: float) -> None:
         """Both arms must T-pose; hold through wind gusts."""
@@ -276,6 +359,7 @@ class Stage:
         self.gust_t = 1.1 - phase if phase < 1.1 else 0.0
         both = self.left_fill >= 0.82 and self.right_fill >= 0.82
         strong = motion.wing_l >= 0.70 and motion.wing_r >= 0.70
+        prev = self.got
         if self.gust_t > 0 and not strong:
             self.got = max(0.0, self.got - dt * 1.4)
             self.fail = 0.4
@@ -290,6 +374,10 @@ class Stage:
                 self.msg_t = 0.35
         else:
             self.got = max(0.0, self.got - dt * 0.55)
+        if int(self.got) > int(prev):
+            self._event("hit", f"撑住 {int(self.got)} 秒")
+        elif int(self.got) < int(prev):
+            self._event("miss", "双臂重新平举到肩高")
 
     def _sim_eagle(self, motion: Motion, hands, dt: float) -> None:
         """Fly: T-pose wings out + keep flapping. Unlike jump — no chair-bounce."""
@@ -300,9 +388,8 @@ class Stage:
         flapping = motion.flap >= 0.22 and (open_wings or motion.wings >= 0.22)
 
         # count a flap beat (low threshold for ~6 FPS)
-        flapped = self._edge(motion.flap, 0.28, 0.08)
-        if flapped:
-            self._tick()
+        if motion.flap_beat:
+            self._tick("双翼扇动")
             self.vy += EAGLE_FLAP_BOOST
             self.gate_msg = "起飞！"
             self.msg_t = 0.3
@@ -357,7 +444,7 @@ class Stage:
         s = 1.0 if motion.wave_side > 0.35 else (-1.0 if motion.wave_side < -0.35 else 0.0)
         if s != 0.0 and s != self.sign:
             self.sign = s
-            self._tick()
+            self._tick("送走一人")
             self.gate_msg = "再见！" if int(self.got) % 2 else "拜拜！"
             self.msg_t = 0.4
 
@@ -373,12 +460,13 @@ class Stage:
                 g["state"] = 1
                 self.msg_t = 1.1
                 if g["kind"] == "flag":
-                    self._tick()
+                    self._tick("碰到旗子")
                     self.gate_msg = "碰到旗子"
                 else:
                     self.got = max(0.0, self.got - 1.0)
                     self.fail = 0.6
                     self.gate_msg = "撞树了"
+                    self._event("miss", self.gate_msg)
             if g["y"] > STAGE_H + 12:
                 top = min(gg["y"] for gg in self.gates)
                 g.update(self._ski_item(min(14.0, top - 36.0)))
@@ -413,13 +501,14 @@ class Stage:
             # cactus just finished passing Steve — judge the leap
             self.obs_cleared = True
             if self.air_over >= CACTUS_H - 2:
-                self._tick()
+                self._tick("越过仙人掌")
                 self.gate_msg = "跳过！"
                 self.msg_t = 0.8
                 self.fail = 0.0
             else:
                 self.fail = 0.65
                 self.gate_msg = "撞到了"
+                self._event("miss", self.gate_msg)
                 self.msg_t = 0.8
             self.air_over = 0.0
 
@@ -438,8 +527,11 @@ class Stage:
             elif d > 0 and self.right_got < self.need:
                 self.right_got += 1
                 self.gate_msg = "右转！"
+            else:
+                return
             self.msg_t = 0.45
             self.pop = 0.45
+            self._event("hit", self.gate_msg)
         elif abs(d) <= 0.16:
             self.armed = True
         self.got = min(self.left_got, self.right_got)
@@ -452,6 +544,7 @@ class Stage:
             self.pop = 0.55
             self.gate_msg = "点！"
             self.msg_t = 0.45
+            self._event("hit", "完成点头")
         self.got = min(self.need, n)
         # keep feet planted — bobble is drawn on the head only
         self.avatar_dy = 0.0
@@ -471,7 +564,7 @@ class Stage:
             self.finger_press[key] = 1.0
             self.notes.append([float(8 + key * PIANO_KEY_W), float(GROUND - 48)])
             if good:
-                self._tick()
+                self._tick("命中亮键")
                 self.target_key = (self.target_key + 3 + int(self.t * 5) % 4) % PIANO_KEYS
                 self.gate_msg = "好听！"
                 self.msg_t = 0.4
@@ -480,14 +573,16 @@ class Stage:
                 self.fail = 0.45
                 self.gate_msg = "按亮着的那根"
                 self.msg_t = 0.5
+                self._event("miss", "请按亮键")
 
-        used_hands = False
         if hands is not None and getattr(hands, "hands", None):
             # screen-left hand owns the low keys, screen-right hand the high ones
             ordered = sorted(hands.hands[:2], key=lambda h: float(h.wrist[0]))
+            visible_keys = set()
+            presses = []
             for idx, hand in enumerate(ordered):
                 if len(ordered) == 1:
-                    hi = 0 if float(hand.wrist[0]) < HAND_FRAME_W * 0.5 else 1
+                    hi = 0 if float(hand.wrist[0]) < self.frame_width * 0.5 else 1
                 else:
                     hi = idx
                 span = max(float(hand.span), 40.0)
@@ -496,6 +591,7 @@ class Stage:
                 mid_y = sum(float(t[1]) for t in tips) / len(tips)
                 for fi, tip in enumerate(tips):
                     key = hi * FINGERS_PER_HAND + fi
+                    visible_keys.add(key)
                     # a pressed finger dips below the rest of its own hand,
                     # so moving the whole hand doesn't fire every key
                     rel = (float(tip[1]) - mid_y) / span
@@ -510,18 +606,24 @@ class Stage:
                     )
                     if self.press_armed.get(key, True) and dip > PIANO_DIP:
                         self.press_armed[key] = False
-                        hit(key, key == self.target_key)
-                        used_hands = True
+                        presses.append((dip, key))
                     elif dip < PIANO_DIP * 0.35:
                         self.press_armed[key] = True
                     self.press_base[key] = base * 0.94 + rel * 0.06
+            for missing in self.press_base.keys() - visible_keys:
+                del self.press_base[missing]
+                del self.press_armed[missing]
+            if presses:
+                # Judge one strike against the key the player could see on this frame.
+                _, key = max(presses)
+                hit(key, key == self.target_key)
 
         # no hand model: wrist X picks the key, wrist bob presses it
-        if not used_hands and self._edge(motion.piano, 0.45, 0.18):
+        if self.piano_input == "wrists" and motion.piano:
             side = 0 if motion.piano_side == "l" else 1
             nx = motion.piano_lx if side == 0 else motion.piano_rx
             key = self._key_at(nx)
-            hit(key, abs(key - self.target_key) <= 1)
+            hit(key, key == self.target_key)
 
         # Steve stays put; only the fingers play
         self.avatar_dx = 0.0
@@ -950,7 +1052,7 @@ class Stage:
                 scr.tri_up(x + kw // 2 - 5, GROUND - 42, 10, 10, YELLOW)
                 scr.rect(x + kw // 2 - 2, GROUND - 34, 4, 6, YELLOW)
         scr.text(8, 36, "亮哪个键", YELLOW, 12)
-        scr.text(8, 48, "就动那根指", YELLOW, 12)
+        scr.text(8, 48, "就动那根指" if self.piano_input == "fingers" else "移腕再下压", YELLOW, 12)
 
     def piano_hand_targets(self, scr: PixelScreen) -> list[tuple[int, int, list, int]]:
         """Per hand: palm spot plus its five fingers parked on their own keys."""

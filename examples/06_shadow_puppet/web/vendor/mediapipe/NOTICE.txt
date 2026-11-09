@@ -1,0 +1,13 @@
+Google MediaPipe Tasks Vision 0.10.21 and BlazePose GHUM Pose Landmarker Lite
+
+The unmodified JavaScript module, WebAssembly loader, and non-SIMD CPU WebAssembly binary
+are from the Apache-2.0 @mediapipe/tasks-vision package, version 0.10.21.
+https://registry.npmjs.org/@mediapipe/tasks-vision/-/tasks-vision-0.10.21.tgz
+
+The unmodified float16 Lite model bundle is version 1, distributed by Google.
+The official BlazePose GHUM 3D model card identifies the Apache License, Version 2.0.
+https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task
+https://storage.googleapis.com/mediapipe-assets/Model%20Card%20BlazePose%20GHUM%203D.pdf
+Model file SHA-256: 59929e1d1ee95287735ddd833b19cf4ac46d29bc7afddbbf6753c459690d574a
+
+See LICENSE.txt for the upstream license.
