@@ -1,416 +1,204 @@
 #!/usr/bin/env python3
-"""Minecraft-Steve style avatar: fixed blocky proportions, mocap-driven limbs."""
+"""Render the same pixel robot as the web stage, driven by mirrored upper-body joints."""
 
 from __future__ import annotations
 
+from functools import lru_cache
+from pathlib import Path
+
+import cv2
 import numpy as np
 
-from pixel_ui import LIME, NIGHT, WHITE, PixelScreen
+from pixel_ui import LIME, PixelScreen
 from pose_tracker import PoseResult
 
-# Steve palette, BGR
-SKIN = (104, 136, 181)
-SKIN_LT = (120, 155, 200)
-SKIN_DK = (73, 99, 142)
-HAIR = (22, 32, 46)
-HAIR_LT = (32, 45, 63)
-EYE_W = (245, 245, 245)
-EYE_B = (168, 60, 60)
-SHIRT = (172, 172, 0)
-SHIRT_DK = (132, 132, 0)
-SHIRT_LT = (198, 198, 20)
-PANTS = (165, 58, 58)
-PANTS_DK = (126, 44, 44)
-SHOE = (78, 78, 78)
-MOUTH = (54, 75, 107)
-
-PAL = {
-    "H": HAIR,
-    "h": HAIR_LT,
-    "S": SKIN,
-    "s": SKIN_DK,
-    "W": EYE_W,
-    "B": EYE_B,
-    "M": MOUTH,
-    ".": None,
-}
-
-HEAD = (
-    ".HHHHHHHHHH.",
-    "HHHHHHHHHHHH",
-    "HHhHHHHHHhHH",
-    "HHSSSSSSSSHH",
-    "HHSWWBBWWSHH",
-    "HHSWWBBWWSHH",
-    "HHSSSSssSSHH",
-    "HHSSMMMMSSHH",
-    "HHSSSsssSSHH",
-    "HHSSSSSSSSHH",
-    ".HSSSSSSSSH.",
-    "..SSSSSSSS..",
-)
-
-# Side profiles for the turn challenge (looking left / right on screen).
-HEAD_L = (
-    ".HHHHHHHHHH.",
-    "HHHHHHHHHHHH",
-    "HHHHHHHHHhHH",
-    "HHSSSSSSSSHH",
-    "HHSWWBBSSSHH",
-    "HHSWWBBSSSHH",
-    "HHSSSSssSSHH",
-    "HHSSMMSSSSHH",
-    "HHSSSsssSSHH",
-    "HHSSSSSSSSHH",
-    ".HSSSSSSSSH.",
-    "..SSSSSSSS..",
-)
-
-HEAD_R = (
-    ".HHHHHHHHHH.",
-    "HHHHHHHHHHHH",
-    "HHhHHHHHHHHH",
-    "HHSSSSSSSSHH",
-    "HHSSSBBWWSHH",
-    "HHSSSBBWWSHH",
-    "HHSSSSssSSHH",
-    "HHSSSSMMSSHH",
-    "HHSSSsssSSHH",
-    "HHSSSSSSSSHH",
-    ".HSSSSSSSSH.",
-    "..SSSSSSSS..",
-)
-
-# Classic Steve ×1.5 — fits a 120px stage next to game props.
-HEAD_W = 12
-HEAD_H = 12
-TORSO_W = 12
-TORSO_H = 18
-ARM_W = 4
-LEG_W = 6
-UPPER_ARM = 10
-FORE_ARM = 10
-LEG_H = 18
-# shoulder → shoe; keep Stage.AV_SH_Y = GROUND - BODY_H in sync
-BODY_H = TORSO_H + LEG_H  # 36
-
-# shoulders sit this far below the top of the head block
-SH_HALF = 6.0
-LIMB_W = LEG_W  # back-compat alias
-# seated piano Steve is drawn bigger so the hands read on the keys
-PIANO_SCALE = 2
+# Colors are BGRA on the logical pixel canvas.
+INK = (56, 38, 32, 255)
+SLEEVE = (139, 140, 67, 255)
+MINT = (167, 219, 136, 255)
+GLOVE = (163, 196, 115, 255)
+LIGHT = (174, 236, 196, 255)
+GOLD = (153, 220, 255, 255)
+VIOLET = (251, 183, 203, 255)
+PAD = np.array([24, 9])
+FEET = PAD + (38, 70)
+BODY_H = 36  # The game uses cy + BODY_H for the collision ground.
 
 
-def _unit(v, fallback):
-    n = float(np.linalg.norm(v))
-    if n < 1e-3:
-        return fallback
-    return v / n
+@lru_cache(maxsize=1)
+def _sprite_parts():
+    path = Path(__file__).resolve().parent / "web" / "art" / "stage-player.png"
+    sheet = cv2.imdecode(np.frombuffer(path.read_bytes(), np.uint8), cv2.IMREAD_UNCHANGED)
+    if sheet is None or sheet.shape != (78, 156, 4):
+        raise ValueError(f"Invalid Xiaodian sprite sheet: {path}")
+    return sheet[:, :78], sheet[:, 78:]
+
+
+def _blit(dst, src, x, y):
+    """Overlay a nearest-neighbor sprite, clipping when a jump reaches the stage edge."""
+    h, w = src.shape[:2]
+    x0, y0 = max(x, 0), max(y, 0)
+    x1, y1 = min(x + w, dst.shape[1]), min(y + h, dst.shape[0])
+    if x1 > x0 and y1 > y0:
+        crop = src[y0-y:y1-y, x0-x:x1-x]
+        cv2.copyTo(crop, crop[:, :, 3], dst[y0:y1, x0:x1])
+
+
+def _direction(v, fallback):
+    norm = np.linalg.norm(v)
+    return v / norm if norm > .001 else fallback
+
+
+def _pt(v):
+    return tuple(np.rint(v).astype(int))
 
 
 class PixelPuppet:
-    """Body-space joints get smoothed; the body is drawn with fixed block sizes."""
-
-    def __init__(self) -> None:
-        self.j: dict[str, np.ndarray] = {}
+    def __init__(self):
+        self.head, self.body = _sprite_parts()
+        self.j = {}
         self.have = False
         self.lost = 9.0
-        self.breathe = 0.0
-        self.face = "idle"
 
     def update(self, pose: PoseResult, dt: float) -> bool:
-        self.breathe += dt
         pts = self._read(pose)
         if pts is None:
             self.lost += dt
             return self.have and self.lost < 1.5
-        self.lost = 0.0
-        for name, v in pts.items():
-            # nose drives the visible nod — keep it snappy
-            if name == "nose":
-                k = 0.85 if self.have else 1.0
-            else:
-                k = 0.45 if self.have else 1.0
-            cur = self.j.get(name)
-            self.j[name] = v if cur is None else cur + (v - cur) * k
+        for name in self.j.keys() - pts.keys():
+            del self.j[name]
+        for name, value in pts.items():
+            previous = self.j.get(name)
+            weight = .85 if name == "nose" else .55
+            self.j[name] = value if not self.have or previous is None or self.lost > .3 else previous + (value-previous)*weight
         self.have = True
+        self.lost = 0.0
         return True
 
-    def _read(self, pose: PoseResult):
-        if not pose.ok or len(pose.xy) < 25:
+    def _read(self, pose):
+        if not pose.ok:
             return None
 
-        def p(i, min_vis=0.2):
-            if i >= len(pose.xy) or pose.vis[i] < min_vis:
+        def point(i):
+            if i >= min(len(pose.xy), len(pose.vis)) or not (pose.vis[i] >= .2):
                 return None
-            return pose.xy[i].astype(np.float32)
+            value = pose.xy[i].astype(np.float32)
+            return value if np.isfinite(value).all() else None
 
-        l_sh, r_sh = p(11), p(12)
-        if l_sh is None or r_sh is None:
+        left, right = point(11), point(12)
+        if left is None or right is None:
             return None
-        # Bind by screen X so Steve's left matches the webcam's left side,
-        # even if BlazePose left/right labels are still swapped once.
-        l_el, r_el = p(13), p(14)
-        l_wr, r_wr = p(15), p(16)
-        if float(l_sh[0]) > float(r_sh[0]):
-            l_sh, r_sh = r_sh, l_sh
-            l_el, r_el = r_el, l_el
-            l_wr, r_wr = r_wr, l_wr
-        sw = float(abs(r_sh[0] - l_sh[0]))
-        if sw < 30:
+        swapped = left[0] > right[0]
+        if swapped:
+            left, right = right, left
+        span = float(right[0] - left[0])
+        if span < 8:
             return None
-        mid = (l_sh + r_sh) * 0.5
-        scale = 2.0 / sw
+        center = (left + right) * .5
+        raw = {"nose": point(0), "l_sh": left, "r_sh": right}
+        for name, index in (("el", 13), ("wr", 15)):
+            raw["l_" + name] = point(index + int(swapped))
+            raw["r_" + name] = point(index + int(not swapped))
+        return {name: (v-center)/span for name, v in raw.items() if v is not None}
 
-        def body(v):
-            if v is None:
-                return None
-            return np.array([(v[0] - mid[0]) * scale, (v[1] - mid[1]) * scale], np.float32)
+    def _arm(self, side):
+        sign = -1 if side == "l" else 1
+        sh, el, wr = (self.j.get(f"{side}_{part}") for part in ("sh", "el", "wr"))
+        shoulder = PAD + (38 + 13*sign, 50 + np.clip(sh[1]*26, -4, 4))
+        if wr is not None and el is None:
+            # Infer the elbow when only the shoulder and wrist are visible.
+            target = (wr-sh)*26
+            axis = _direction(target, np.array([sign, 0]))
+            length = np.clip(np.linalg.norm(target), 2, 25)
+            along = (13**2 - 12**2 + length**2)/(2*length)
+            normal = np.array([-axis[1], axis[0]])
+            bend_side = np.sign(-axis[1]*sign) if abs(axis[1]) > .05 else np.sign(axis[0])
+            elbow = shoulder + axis*along + normal*bend_side*np.sqrt(max(0, 13**2 - along**2))
+            return shoulder, elbow, shoulder + axis*length
+        upper = np.array([sign, .7]) if el is None else el-sh
+        lower = np.array([sign*.38, .9]) if el is None or wr is None else wr-el
+        elbow = shoulder + 13*_direction(upper, np.array([0, 1]))
+        return shoulder, elbow, elbow + 12*_direction(lower, np.array([0, 1]))
 
-        raw = {
-            "l_sh": l_sh,
-            "r_sh": r_sh,
-            "l_el": l_el,
-            "r_el": r_el,
-            "l_wr": l_wr,
-            "r_wr": r_wr,
-            "nose": p(0),
-        }
-        out = {}
-        for name, v in raw.items():
-            b = body(v)
-            if b is not None:
-                out[name] = b
-        out.setdefault("nose", np.array([0.0, -1.6], np.float32))
-        out.setdefault("l_el", out["l_sh"] + np.array([0.35, 1.0], np.float32))
-        out.setdefault("r_el", out["r_sh"] + np.array([-0.35, 1.0], np.float32))
-        out.setdefault("l_wr", out["l_el"] + np.array([0.2, 1.0], np.float32))
-        out.setdefault("r_wr", out["r_el"] + np.array([-0.2, 1.0], np.float32))
-        return out
+    @staticmethod
+    def _forearm(layer, elbow, wrist):
+        cv2.line(layer, _pt(elbow), _pt(wrist), INK, 6)
+        cv2.line(layer, _pt(elbow), _pt(wrist), MINT, 3)
+        x, y = _pt(wrist)
+        cv2.rectangle(layer, (x-4, y-3), (x+3, y+3), INK, -1)
+        cv2.rectangle(layer, (x-3, y-2), (x+2, y+2), GLOVE, -1)
+        cv2.rectangle(layer, (x-2, y-3), (x, y-1), LIGHT, -1)
 
-    # ---------- drawing ----------
-
-    def draw(
-        self,
-        scr: PixelScreen,
-        cx: int,
-        cy: int,
-        accent=LIME,
-        shirt=SHIRT,
-        style: str = "",
-        nod: float = 0.0,
-        turn_dir: float = 0.0,
-    ) -> None:
-        """cy is the shoulder line; Steve stands BODY_H px tall below it.
-
-        style='nod' → bobblehead + big vertical travel so the nod reads as a game beat.
-        style='turn' → bigger head yaw.
-        style='piano' → seated torso+head only (hands drawn on the keyboard separately).
-        """
-        if not self.have:
+    def draw(self, scr, cx, cy, accent=LIME, shirt=None, style="", nod=0.0, turn_dir=0.0, lean=0.0):
+        if not self.have or self.lost >= 1.5:
             return
-        bob = int(1.0 * np.sin(self.breathe * 2.0))
-        cy += bob
-        down = np.array([0.0, 1.0], np.float32)
-        bobble = style == "nod"
-        turny = style == "turn"
-        seated = style == "piano"
-        head_scale = 3 if bobble else (2 if turny else (PIANO_SCALE if seated else 1))
-        hw = HEAD_W * head_scale
-        hh = HEAD_H * head_scale
+        layer = np.zeros((91, 127, 4), np.uint8)
+        arms = [self._arm(side) for side in ("l", "r")]
+        if style != "piano":
+            for side, (shoulder, elbow, wrist) in zip(("l","r"), arms):
+                reach = wrist-shoulder
+                if style == "eagle" and abs(reach[0]) > 10 and side+"_wr" in self.j:
+                    sign = np.sign(reach[0])
+                    for i in range(3):
+                        base = shoulder + reach*(.40 + i*.18)
+                        vertices = [base, base + (sign*6, reach[1]*.16), base + (sign*(3-i), 9-i)]
+                        cv2.fillConvexPoly(layer, np.rint(vertices).astype(np.int32), MINT if i == 1 else GLOVE)
+                cv2.line(layer, _pt(shoulder), _pt(elbow), INK, 7)
+                cv2.line(layer, _pt(shoulder), _pt(elbow), SLEEVE, 4)
+                self._forearm(layer, elbow, wrist)
+        _blit(layer, self.body, *PAD)
+        nose = self.j.get("nose")
+        yaw = float(nose[0]) if nose is not None else 0.
+        rest_y = float(np.clip((nose[1]+.68)*9, -3, 5)) if nose is not None else 0.
+        turn = float(np.clip(turn_dir/.38,-1,1)) if style == "turn" and nose is not None else 0.
+        dip = float(np.clip(nod,0,1)) if style == "nod" and nose is not None else 0.
+        sx = (-1 if turn>.40 else 1) * (1-.30*abs(turn))
+        sy = 1-.27*dip
+        # Anchor at the same neck joint used by the web player.
+        head_x = PAD[0]+38+round(np.clip(yaw,-.7,.7)*4 + turn*7)-38*sx
+        head_y = PAD[1]+48+round(dip*3 if dip else rest_y)-48*sy
+        matrix = np.float32([[sx,0,head_x],[0,sy,head_y]])
+        head = cv2.warpAffine(self.head,matrix,(layer.shape[1],layer.shape[0]),flags=cv2.INTER_NEAREST)
+        _blit(layer,head,0,0)
+        if style != "piano":
+            for side, (_,elbow,wrist) in zip(("l","r"),arms):
+                wx, wy = wrist-PAD
+                if side+"_wr" in self.j and 15 < wx < 62 and wy < 53:
+                    self._forearm(layer,elbow,wrist)
+        if style == "ski" and lean:
+            matrix = cv2.getRotationMatrix2D(tuple(map(float, FEET)), float(np.clip(-lean,-1,1))*11, 1)
+            layer = cv2.warpAffine(layer, matrix, (layer.shape[1],layer.shape[0]), flags=cv2.INTER_NEAREST)
+        scale = .74 if style == "piano" else 1.
+        if style == "piano":
+            layer = cv2.resize(layer, None, fx=scale, fy=scale, interpolation=cv2.INTER_NEAREST)
+        feet_y = cy + (20 if style == "piano" else BODY_H)
+        _blit(scr.p, layer, round(cx-FEET[0]*scale), round(feet_y-FEET[1]*scale))
 
-        if seated:
-            s = PIANO_SCALE
-            tw, th = TORSO_W * s, TORSO_H * s
-            # short pants peeking under the fallboard; no dangling mocap arms
-            ly = cy + th - 2 * s
-            for dx in (-tw // 2 + s, s):
-                scr.rect(cx + dx - 1, ly - 1, LEG_W * s + 1, 5 * s, NIGHT)
-                scr.rect(cx + dx, ly, LEG_W * s - 1, 4 * s, PANTS)
-            tx = cx - tw // 2
-            scr.rect(tx - 1, cy - 1, tw + 2, th + 2, NIGHT)
-            scr.rect(tx, cy, tw, th, shirt)
-            scr.rect(tx, cy, tw, 2 * s, SHIRT_LT if shirt is SHIRT else shirt)
-            scr.rect(cx - 1, cy + 2 * s, 2, th - 2 * s, SHIRT_DK)
-            scr.rect(cx - s, cy, 2 * s, 2, SKIN_DK)
-            # arms live in draw_piano_arms so they can reach the keys
-            nose = self.j.get("nose", np.array([0.0, -1.6], np.float32))
-            hdx = int(np.clip(nose[0] * 3.0, -3, 3))
-            hdy = int(np.clip((nose[1] + 1.6) * 2.5, -2, 3))
-            hx = cx - hw // 2 + hdx
-            hy = cy - hh + 2 * s + hdy
-            hy = min(hy, cy + 3 * s)
-            hy = max(hy, cy - hh - 3 * s)
-            self._bar(scr, (cx, cy + 1), (hx + hw // 2, hy + hh), 2 * s, SKIN_DK)
-            scr.rect(hx - 1, hy - 1, hw + 2, hh + 2, NIGHT)
-            self._blit_head(scr, hx, hy, head_scale, HEAD)
-            if self.face == "happy":
-                scr.rect(hx + 2 * s, hy + 8 * s, 8 * s, 2 * s, accent)
+    def draw_piano_arms(self, scr: PixelScreen, cx, cy, targets, shirt=None):
+        if not self.have or self.lost >= 1.5:
             return
-
-        # legs first — flush under the torso
-        ly = cy + TORSO_H
-        for dx in (-TORSO_W // 2, 0):
-            scr.rect(cx + dx - 1, ly - 1, LEG_W + 2, LEG_H + 2, NIGHT)
-            scr.rect(cx + dx, ly, LEG_W, LEG_H, PANTS)
-            scr.rect(cx + dx, ly, 2, LEG_H, PANTS_DK)
-            scr.rect(cx + dx + LEG_W - 2, ly, 1, LEG_H, PANTS_DK)
-            scr.rect(cx + dx, ly + LEG_H - 4, LEG_W, 4, SHOE)
-            scr.rect(cx + dx, ly + LEG_H - 4, LEG_W, 1, NIGHT)
-
-        # eagle: bird wings are drawn by the stage; skip mocap arms (they read as jet wings)
-        if style != "eagle":
-            for side, sx in (("l", -1), ("r", 1)):
-                sh = self.j.get(f"{side}_sh")
-                el = self.j.get(f"{side}_el")
-                wr = self.j.get(f"{side}_wr")
-                if sh is None or el is None or wr is None:
-                    continue
-                d1 = _unit(el - sh, down)
-                d2 = _unit(wr - el, down)
-                ax = cx + sx * (TORSO_W // 2 + ARM_W // 2 + 1)
-                ay = cy + 2
-                ex = int(round(ax + d1[0] * UPPER_ARM))
-                ey = int(round(ay + d1[1] * UPPER_ARM))
-                wx = int(round(ex + d2[0] * FORE_ARM))
-                wy = int(round(ey + d2[1] * FORE_ARM))
-                self._bar(scr, (ax, ay), (ex, ey), ARM_W, shirt)
-                self._bar(scr, (ex, ey), (wx, wy), ARM_W, SKIN)
-                scr.rect(wx - 1, wy - 1, 3, 3, NIGHT)
-                scr.rect(wx, wy, 2, 2, SKIN_LT)
-
-        # torso — tip forward a bit while nodding down
-        tip = 0
-        if bobble:
-            tip = int(np.clip(nod * 6.0, 0, 10))
-        tx = cx - TORSO_W // 2
-        scr.rect(tx - 1, cy - 1 + tip, TORSO_W + 2, TORSO_H + 2, NIGHT)
-        scr.rect(tx, cy + tip, TORSO_W, TORSO_H, shirt)
-        scr.rect(tx, cy + tip, TORSO_W, 2, SHIRT_LT if shirt is SHIRT else shirt)
-        scr.rect(cx - 1, cy + 2 + tip, 2, TORSO_H - 2, SHIRT_DK)
-        scr.rect(tx, cy + TORSO_H - 2 + tip, TORSO_W, 2, SHIRT_DK)
-        scr.rect(cx - 2, cy + tip, 4, 2, SKIN_DK)
-
-        # head tracking — exaggerate, but never detach from the collar
-        nose = self.j.get("nose", np.array([0.0, -1.6], np.float32))
-        max_x = 6 if bobble else (2 if turny else 3)
-        if bobble:
-            hdx = int(np.clip(nose[0] * 5.0, -max_x, max_x))
-            # big vertical travel so a desk nod reads as a game beat
-            hdy = int(np.clip((nose[1] + 1.6) * 16.0 + nod * 14.0, -10, 24))
-        elif turny:
-            # profile sprite shows the turn; only a tiny lean on the neck
-            hdx = int(np.clip(turn_dir * 2.5, -max_x, max_x))
-            hdy = int(np.clip((nose[1] + 1.6) * 2.0, -2, 3))
-        else:
-            hdx = int(np.clip(nose[0] * 3.0, -max_x, max_x))
-            hdy = int(np.clip((nose[1] + 1.6) * 2.5, -2, 3))
-        hx = cx - hw // 2 + hdx
-        hy = cy - hh + 4 + hdy + tip
-        # keep chin near collar, but allow a wide nod arc
-        hy = min(hy, cy + tip + 6)
-        hy = max(hy, cy + tip - hh - 10)
-
-        # neck bridge collar → chin (drawn under the head)
-        chin_x = hx + hw // 2
-        chin_y = hy + hh
-        self._bar(scr, (cx, cy + tip + 1), (chin_x, chin_y), 4, SKIN_DK)
-        scr.rect(cx - 2, cy + tip - 1, 4, 4, SKIN_DK)
-
-        if turny and turn_dir < -0.28:
-            face_rows = HEAD_L
-        elif turny and turn_dir > 0.28:
-            face_rows = HEAD_R
-        else:
-            face_rows = HEAD
-
-        scr.rect(hx - 1, hy - 1, hw + 2, hh + 2, NIGHT)
-        self._blit_head(scr, hx, hy, head_scale, face_rows)
-        if face_rows is HEAD_L:
-            scr.rect(hx + hw - 2 * head_scale, hy + 3 * head_scale, 2 * head_scale, 5 * head_scale, HAIR)
-            scr.rect(hx + hw - head_scale, hy + 5 * head_scale, head_scale, 2 * head_scale, SKIN_DK)
-        elif face_rows is HEAD_R:
-            scr.rect(hx, hy + 3 * head_scale, 2 * head_scale, 5 * head_scale, HAIR)
-            scr.rect(hx, hy + 5 * head_scale, head_scale, 2 * head_scale, SKIN_DK)
-        if self.face == "happy":
-            scr.rect(hx + 2 * head_scale, hy + 8 * head_scale, 8 * head_scale, 2 * head_scale, accent)
-        elif self.face == "tired":
-            scr.rect(hx + 2 * head_scale, hy + 5 * head_scale, 3 * head_scale, 2 * head_scale, MOUTH)
-            scr.rect(hx + 7 * head_scale, hy + 5 * head_scale, 3 * head_scale, 2 * head_scale, MOUTH)
-
-    def draw_piano_arms(self, scr: PixelScreen, cx: int, cy: int, targets, shirt=SHIRT) -> None:
-        """Seated arms: shoulder → elbow → blocky hand resting on a key."""
-        if not self.have:
-            return
-        s = PIANO_SCALE
-        aw = ARM_W + 2 * s
-        ph = 2 * s  # knuckle row height
-        for i, (hx, hy, fingers, pitch) in enumerate(targets):
-            sx = cx + (-1 if i == 0 else 1) * (TORSO_W * s // 2 + aw // 2)
-            sy = cy + 2 * s
-            # sleeve covers most of the reach; only a short wrist drop onto the keys
-            ex = int(sx + (hx - sx) * 0.7)
-            ey = int(sy + (hy - sy) * 0.5)
-            self._bar(scr, (sx, sy), (ex, ey), aw, shirt)
-            self._bar(scr, (ex, ey), (hx, hy - ph - s), aw, SKIN)
-            scr.rect(ex - aw // 2, ey - aw // 2, aw, aw, NIGHT)
-            scr.rect(ex - aw // 2 + 1, ey - aw // 2 + 1, aw - 2, aw - 2, shirt)
-            # narrow back of hand over a wider knuckle row reads as a hand, not a plank
-            fw = max(2, pitch - 4 * s)  # leave a clear gap between fingers
-            kn_w = fingers[-1][0] - fingers[0][0] + fw
-            back_w = max(fw, kn_w - 2 * pitch)
-            scr.rect(hx - back_w // 2 - 1, hy - ph - 2 * s - 1, back_w + 2, 2 * s + 2, NIGHT)
-            scr.rect(hx - back_w // 2, hy - ph - 2 * s, back_w, 2 * s, SKIN)
-            scr.rect(hx - kn_w // 2 - 1, hy - ph - 1, kn_w + 2, ph + 2, NIGHT)
-            scr.rect(hx - kn_w // 2, hy - ph, kn_w, ph, SKIN)
-            scr.rect(hx - kn_w // 2, hy - ph, kn_w, s, SKIN_LT)
-            # one finger per key; the pressed one reaches deeper into its key
-            for fi, (fx, press) in enumerate(fingers):
-                fl = 5 * s + (0, 1, 2, 1, 0)[fi] * s // 2 + int(press * 2 * s)
-                scr.rect(fx - fw // 2 - 1, hy - 1, fw + 2, fl + 2, NIGHT)
-                scr.rect(fx - fw // 2, hy, fw, fl, SKIN)
-                scr.rect(fx - fw // 2, hy + fl - s, fw, s, SKIN_DK)
-
-    def _blit_head(self, scr: PixelScreen, hx: int, hy: int, scale: int, rows=None) -> None:
-        rows = HEAD if rows is None else rows
-        if scale <= 1:
-            scr.sprite(hx, hy, rows, PAL)
-            return
-        for j, row in enumerate(rows):
-            for i, ch in enumerate(row):
-                if ch in " .":
-                    continue
-                c = PAL.get(ch)
-                if c is not None:
-                    scr.rect(hx + i * scale, hy + j * scale, scale, scale, c)
-
-    def _bar(self, scr: PixelScreen, a, b, width: int, color) -> None:
-        """Thin limb: fill first, 1px ink rim — avoids black-stick look."""
-        dx, dy = int(b[0] - a[0]), int(b[1] - a[1])
-        n = max(abs(dx), abs(dy), 1)
-        if n > 120:
-            return
-        half = max(0, width // 2)
-        for i in range(n + 1):
-            x = int(a[0]) + dx * i // n
-            y = int(a[1]) + dy * i // n
-            scr.rect(x - half, y - half, width, width, color)
-        # light outline only on the ends so diagonals stay readable
-        scr.rect(int(a[0]) - half, int(a[1]) - half, width, width, NIGHT)
-        scr.rect(int(b[0]) - half, int(b[1]) - half, width, width, NIGHT)
-        scr.rect(int(a[0]) - half + 1, int(a[1]) - half + 1, max(1, width - 2), max(1, width - 2), color)
-        scr.rect(int(b[0]) - half + 1, int(b[1]) - half + 1, max(1, width - 2), max(1, width - 2), color)
-
-    # ---------- helpers ----------
-
-    def joint(self, name: str, cx: int, cy: int):
-        v = self.j.get(name)
-        if v is None:
-            return None
-        return (int(round(cx + v[0] * SH_HALF)), int(round(cy + v[1] * SH_HALF)))
-
-    def span_units(self) -> float:
-        l_wr, r_wr = self.j.get("l_wr"), self.j.get("r_wr")
-        if l_wr is None or r_wr is None:
-            return 0.0
-        return float(abs(l_wr[0] - r_wr[0]))
+        for side,(hx,hy,fingers,pitch) in enumerate(targets):
+            wrist_mode = len(fingers) == 1
+            if wrist_mode and ("r_wr" if side else "l_wr") not in self.j:
+                continue
+            sx = cx + (10 if side else -10)
+            sy = cy+5
+            if wrist_mode:
+                hy += round(fingers[0][1]*5)
+            elbow = (round(sx+.65*(hx-sx)), round(sy+.4*(hy-sy)))
+            cv2.line(scr.p, (sx,sy), elbow, INK, 7)
+            cv2.line(scr.p, (sx,sy), elbow, SLEEVE, 4)
+            cv2.line(scr.p, elbow, (hx,hy), INK, 6)
+            cv2.line(scr.p, elbow, (hx,hy), MINT, 3)
+            color = VIOLET if side else MINT
+            palm_w = 10 if wrist_mode else pitch*3
+            scr.rect(hx-palm_w//2-1,hy-5,palm_w+2,8,INK)
+            scr.rect(hx-palm_w//2,hy-4,palm_w,6,GLOVE)
+            for i,(x,press) in enumerate(fingers):
+                length = 5+round(press*6)
+                width = 4 if wrist_mode else max(3,pitch//3)
+                if not wrist_mode:
+                    cv2.line(scr.p,(hx+round((i-2)*pitch*.6),hy),(x,hy+3),INK,4)
+                    cv2.line(scr.p,(hx+round((i-2)*pitch*.6),hy),(x,hy+3),GLOVE,2)
+                scr.rect(x-width//2-1,hy+2,width+2,length+1,INK)
+                scr.rect(x-width//2,hy+2,width,length,color)

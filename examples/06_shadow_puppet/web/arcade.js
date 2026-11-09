@@ -34,22 +34,17 @@
   const moves = new Map(catalog.map(game => [game.moveId,game]));
   const boardMode = document.documentElement.dataset.device === "board";
   let deckMotion = !boardMode && location.protocol !== "file:" && window.isSecureContext;
-  let sound = false;
-  try { sound = localStorage.getItem("desk.sound") === "on"; } catch {}
-  window.deskSoundEnabled = () => sound;
+  const audio = window.DeskAudio;
   function renderSound() {
     const button = $("sound");
-    const label = sound ? "关闭音效" : "开启音效";
-    button.setAttribute("aria-pressed", String(sound));
+    const label = audio.enabled ? "关闭音乐与音效" : "开启音乐与音效";
+    button.setAttribute("aria-pressed", String(audio.enabled));
     button.setAttribute("aria-label", label);
     button.title = label;
-    button.innerHTML = icon(sound ? "sound" : "mute");
+    button.innerHTML = icon(audio.enabled ? "sound" : "mute");
   }
-  $("sound").addEventListener("click", () => {
-    sound = !sound;
-    try { localStorage.setItem("desk.sound", sound ? "on" : "off"); } catch {}
-    renderSound();
-  });
+  $("sound").addEventListener("click", () => audio.enable(!audio.enabled));
+  window.addEventListener("desk:sound", renderSound);
   renderSound();
   const guide = $("help-dialog");
   $("help").addEventListener("click", () => guide.showModal());
@@ -156,6 +151,47 @@
   const coach = window.ActionCoach;
   const cameraInfo = $("camera-info");
   const idle = () => !boardMode && !liveStatus;
+  let audioRound = "", audioFeedback = "", clearSoundPlayed = false, endedSoundAt = 0;
+  function pageMusic() {
+    if (currentPage !== "board") return "lobby";
+    if (liveStatus?.phase === "round") return liveStatus.act_id;
+    if (liveStatus?.phase === "summary") return null;
+    return singleMove || "lobby";
+  }
+  function syncRoundAudio(s) {
+    if (currentPage !== "board") return;
+    audio.setBase(pageMusic());
+    if (s?.phase !== "round") {
+      if (s?.phase === "summary" && audioRound && s.round_ended_at !== endedSoundAt) {
+        endedSoundAt = s.round_ended_at;
+        if (s.cleared < s.round_len) audio.cue("fail");
+        else if (!clearSoundPlayed) audio.cue("reward");
+      }
+      audioRound = "";
+      return;
+    }
+    const key = s.act_i + "/" + s.act_id;
+    if (key !== audioRound) {
+      audioRound = key;
+      audioFeedback = "";
+      clearSoundPlayed = false;
+      if (s.sub !== "clear") audio.cue("start");
+    }
+    if (s.sub === "clear") {
+      // The board uses the same settlement phase for a timeout and a clear.
+      const completed = s.results?.[s.act_i]?.cleared ?? (s.challenge?.frac >= 1);
+      if (completed && !clearSoundPlayed) {
+        audio.cue("reward");
+        clearSoundPlayed = true;
+      }
+      return;
+    }
+    const feedback = s.challenge?.feedback;
+    if (s.sub !== "play" || s.challenge?.tracking === false || !feedback) return;
+    if (!["hit", "miss"].includes(feedback.kind) || audioFeedback === feedback.seq) return;
+    audioFeedback = feedback.seq;
+    audio.cue(feedback.kind);
+  }
   function drawGuide() {
     clearTimeout(guideTimer);
     guideTimer=null;
@@ -214,7 +250,7 @@
     cameraInfo.textContent = message;
     resetHit();
     if (keepResult) { updateStream(); drawGuide(); }
-    else { liveStatus=null; renderPreview(); }
+    else { liveStatus=null; audioRound=""; audio.setBase(pageMusic()); renderPreview(); }
   }
   $("start-camera").addEventListener("click", async () => {
     if (cameraRequest || boardMode) return;
@@ -303,6 +339,7 @@
     hitTimer=setTimeout(() => {hit.hidden=true;},750);
   }
   function renderBoard(s) {
+    syncRoundAudio(s);
     const online = Boolean(s);
     const local=s?.source==="camera";
     const challenge = s?.challenge || {};
@@ -404,6 +441,8 @@
       singleMove=nextMove;
       guideId=singleMove || "wings";
     }
+    if (currentPage !== "board") audioRound = "";
+    audio.setBase(pageMusic());
     for (const name of ["lobby","board","records"]) {
       $("view-" + name).hidden = name !== currentPage;
       const link = document.querySelector('[data-page="' + name + '"]');

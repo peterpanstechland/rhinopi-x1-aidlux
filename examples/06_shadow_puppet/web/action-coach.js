@@ -3,7 +3,7 @@
   'use strict';
   const W = 256, H = 144;
   const ink = '#171a2a', mint = '#9af4c0', coral = '#ffac8e', gold = '#ffdb88';
-  const lilac = '#c0b7f6', dim = '#72698c', hair = '#40384d', skin = '#ffd1ac';
+  const lilac = '#c0b7f6', dim = '#72698c', glove = '#86cbb0';
   const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)');
 
   const actions = [
@@ -67,6 +67,38 @@
     for (const key of ['lean','lift','yaw','pitch','press']) sample[key] = mix(prev[key],target[key]);
     return {sample,index,label:step[0],progress,loops};
   }
+  function liveFrame(id,steps,f,s) {
+    if (s?.sub!=='play' || s.challenge?.tracking===false) return f;
+    const visual=s.challenge?.visual || {};
+    function target(index,label) {
+      return {...f,index,label,sample:steps[index][2]};
+    }
+    if (id==='wings' && s.challenge.count>0) {
+      const held=target(1,'维持肩高');
+      held.progress=s.challenge.frac || 0;
+      return held;
+    }
+    if (id==='lean' && Array.isArray(visual.gates)) {
+      const next=visual.gates.filter(g=>!g.state && g.y>=0 && g.y<=96).sort((a,b)=>b.y-a.y)[0];
+      if (!next) return f;
+      const right=next.kind==='tree' ? next.x<=160 : next.x>160;
+      const label=(right?'向右倾':'向左倾') + (next.kind==='tree'?' · 躲树':' · 碰旗');
+      return {...target(right?2:0,label), obstacle:next.kind};
+    }
+    if (id==='hands_up' && Number.isFinite(visual.obs)) {
+      if (visual.avatar_dy < -1) return target(2,'落回坐姿');
+      const launch=s.source==='camera' ? 211 : 260;
+      return visual.obs>160 && visual.obs<launch ? target(1,'现在轻挺上身') : target(0,'坐稳，等仙人掌');
+    }
+    if (id==='turn') {
+      const turn=visual.head_turn || 0;
+      if (Math.abs(turn)>=1) return target(1,'回到正中');
+      if (visual.left_got>=3 && visual.right_got<3) return target(2,'转向右边');
+      if (visual.right_got>=3 && visual.left_got<3) return target(0,'转向左边');
+    }
+    if (id==='nod' && visual.head_dip>=1) return target(2,'抬头回正');
+    return f;
+  }
   const round = Math.round;
   function box(c,x,y,w,h,color) {
     c.fillStyle = color;
@@ -101,90 +133,68 @@
       box(c,x,y,6,1,dim); box(c,x+(x>128?5:0),y+(y>100?-5:0),1,6,dim);
     }
   }
-  function limb(c,side,shoulder,angles,active) {
-    const point = (base,angle,length) => [
-      base[0]+side*Math.cos(angle*Math.PI/180)*length,
-      base[1]+Math.sin(angle*Math.PI/180)*length
-    ];
-    const elbow = point(shoulder,angles[0],17), wrist = point(elbow,angles[1],18);
-    segment(c,shoulder,elbow,10,ink); segment(c,elbow,wrist,8,ink);
-    segment(c,shoulder,elbow,7,active ? '#7bd9ad' : '#77759d');
-    segment(c,elbow,wrist,5,active ? '#8edfb0' : '#9284a7');
-    box(c,wrist[0]-3,wrist[1]-3,7,7,ink);
-    box(c,wrist[0]-2,wrist[1]-2,5,5,active ? gold : skin);
-    if (active) {box(c,elbow[0]-1,elbow[1]-1,3,3,'#d7ffd6');box(c,wrist[0]-1,wrist[1]-2,2,2,'#fff4ce');}
-  }
-  function head(c,x,y,pose,active) {
-    const yaw = pose.yaw, pitch = pose.pitch, off = round(yaw*6);
-    c.save(); c.translate(round(x),round(y));
-    polygon(c,[[-14,-11],[-9,-16],[8,-16],[14,-12],[16,-6],[14,9],[8,14],[-7,14],[-14,9],[-16,-3]],ink);
-    polygon(c,[[-12,-9],[-7,-12],[9,-12],[13,-7],[12,7],[7,11],[-6,11],[-12,7]],skin);
-    box(c,-15+Math.max(0,off),0,4,6,'#df9a86'); box(c,11+Math.min(0,off),0,4,6,'#df9a86');
-    const hairY = round(pitch*5);
-    polygon(c,[[-14,0],[-14,-10],[-9,-14],[8,-14],[13,-10],[14,-3],[8,-5+hairY],[0,-6+hairY],[-4,-3+hairY],[-9,-4+hairY],[-10,3]],hair);
-    box(c,-9,-12,11,2,'#76607d');
-    const eyeY = 0 + round(pitch*6);
-    if(yaw < .8) box(c,-7+off,eyeY,3,3,ink);
-    if(yaw > -.8) box(c,5+off,eyeY,3,3,ink);
-    box(c,off*1.35,eyeY+3,3,2,'#d78a73');
-    box(c,off-2,eyeY+7,4,1,'#b8766f');
-    if (active) {box(c,-15,-8,3,6,mint);box(c,-12,-10,3,2,mint);}
-    c.restore();
-  }
-  function chair(c) {
-    box(c,106,101,45,7,'#514e68');box(c,109,101,39,2,'#817790');
-    box(c,109,108,3,16,'#4d4c64');box(c,145,108,3,16,'#4d4c64');
-  }
-  function person(c,id,p) {
-    chair(c);
-    for(const x of [114,135]) {
-      box(c,x,98,11,22,'#3d4767');box(c,x-2,118,15,5,'#afa6ba');box(c,x-2,122,15,2,ink);
+  // The guide feeds the same shoulder, elbow and wrist landmarks as a live player.
+  function demoAvatar(c, id, pose) {
+    const points = [];
+    points[0] = [.5 + pose.yaw * .04, .34 + .045 * pose.pitch];
+    for (let side = 0; side < 2; side++) {
+      const direction = side ? 1 : -1;
+      const shoulder = [.5 + direction * .12, .50 + direction * .02 * pose.lean];
+      const extend = (joint, angle) => {
+        const radians = angle * Math.PI / 180;
+        return [joint[0] + direction * .12 * Math.cos(radians), joint[1] + .12 * Math.sin(radians)];
+      };
+      const elbow = extend(shoulder, pose.arms[side * 2]);
+      points[11 + side] = shoulder;
+      points[13 + side] = elbow;
+      points[15 + side] = extend(elbow, pose.arms[side * 2 + 1]);
     }
-    const x=128+14*p.lean, y=69-10*p.lift;
-    const tilt=p.lean*4;
-    polygon(c,[[x-15,y-5-tilt],[x-8,y-8],[x+8,y-8],[x+15,y-5+tilt],[142,100],[114,100]],ink);
-    polygon(c,[[x-13,y-3-tilt],[x-7,y-6],[x+7,y-6],[x+13,y-3+tilt],[140,97],[116,97]],'#579796');
-    polygon(c,[[x-12,y-2-tilt],[x-7,y-5],[x+6,y-4],[x+9,y-1],[136,93],[117,93]],'#80ccb0');
-    polygon(c,[[x-6,y-7],[x+6,y-7],[x+4,y-2],[x,y+1],[x-4,y-2]],ink);
-    box(c,x-4,y-12,8,10,skin);
-    box(c,x+3,y+5,5,3,'#f8d98e');box(c,x+4,y+8,2,2,'#f8d98e');
-    const armsOn = ['wings','flap','hands_up'].includes(id);
-    limb(c,-1,[x-13,y-tilt],p.arms.slice(0,2),armsOn);
-    limb(c,1,[x+13,y+tilt],p.arms.slice(2),armsOn || id==='wave');
-    head(c,x+p.lean*7,y-24+p.pitch*5,p,['lean','turn','nod'].includes(id));
+    const visual = {avatar_dx: pose.lean * 58, head_turn: pose.yaw, head_dip: pose.pitch};
+    if (id === 'hands_up') {
+      box(c,108,111,40,5,'#76738a');
+      box(c,112,116,3,8,dim); box(c,141,116,3,8,dim);
+    }
+    window.MotionStage.paintAvatar(c, {
+      phase:'round', act_id:id, pose_points:points, pose_aspect:1, challenge:{visual}
+    },128 + pose.lean * 7,116 - pose.lift * 11,.98);
   }
   function prompts(c,id,f) {
     const {sample:p,index,progress} = f;
     if(id==='wings') {
       for (const sign of [-1,1]) {
         const x=128+sign*55;
-        for(let i=0;i<4;i++) box(c,x+sign*i*5,69,2,1,dim);
-        if(index===0) arrow(c,x-sign*9,80,x+sign*3,69,mint);
+        for(let i=0;i<4;i++) box(c,x+sign*i*5,86,2,1,dim);
+        if(index===0) arrow(c,x-sign*9,98,x+sign*3,86,mint);
       }
-      if(index===1) for(let i=0;i<5;i++) box(c,112+i*7,13,5,3,i/5<=progress ? gold : dim);
+      if(index===1) for(let i=0;i<5;i++) box(c,15+i*7,18,5,3,i/5<=progress ? gold : dim);
     } else if(id==='flap') {
       for (const sign of [-1,1]) {
         const x=128+sign*59;
-        arrow(c,x,index===2?55:72,x,index===2?75:52,coral);
+        arrow(c,x,index===2?70:88,x,index===2?90:68,coral);
       }
     } else if(id==='wave') {
       arrow(c,170,46,index===2?156:184,46,gold);
     } else if(id==='lean') {
       const side=p.lean<0?-1:1;
-      const x=128+side*64;
-      box(c,x-1,64,2,33,'#c2c5ac');
-      polygon(c,[[x+1,65],[x+15,66],[x+11,71],[x+1,72]],coral);
-      if(Math.abs(p.lean)>.15) arrow(c,128+side*26,51,128+side*42,51,mint);
+      const x=128+(f.obstacle==='tree'?-side:side)*64;
+      if (f.obstacle==='tree') {
+        box(c,x-2,85,4,12,'#ac9280');
+        polygon(c,[[x,62],[x+12,88],[x-12,88]],'#76c4a7');
+        polygon(c,[[x,62],[x+5,74],[x-6,75]],'#d5ece4');
+      } else {
+        box(c,x-1,64,2,33,'#c2c5ac');
+        polygon(c,[[x+1,65],[x+15,66],[x+11,71],[x+1,72]],coral);
+      }
+      if(Math.abs(p.lean)>.15) arrow(c,128+side*42,51,128+side*58,51,mint);
     } else if(id==='hands_up') {
-      for(const x of [97,159]) arrow(c,x,index===2?61:73,x,index===2?74:58,mint);
-      for(let x=111;x<148;x+=5) box(c,x,68,2,1,dim);
+      for(const x of [77,179]) arrow(c,x,index===2?72:87,x,index===2?87:72,mint);
     } else if(id==='turn') {
       const dir=p.yaw<0?-1:1;
-      if(index%2===0) arrow(c,128+dir*21,44,128+dir*38,44,gold);
-      else for(const dir of [-1,1]) arrow(c,128+dir*34,44,128+dir*23,44,mint);
+      if(index%2===0) arrow(c,128+dir*44,48,128+dir*61,48,gold);
+      else for(const dir of [-1,1]) arrow(c,128+dir*59,48,128+dir*44,48,mint);
     } else if(id==='nod') {
-      arrow(c,155,index===1?37:55,155,index===1?55:39,gold);
-      box(c,102,68,8,1,dim);box(c,146,68,8,1,dim);
+      arrow(c,181,index===1?42:63,181,index===1?63:42,gold);
+      box(c,85,86,8,1,dim);box(c,163,86,8,1,dim);
     }
   }
   function keyboard(c,f,target,wrist) {
@@ -210,9 +220,9 @@
       segment(c,[x+11*side,29],[x, y-12],14,ink);
       segment(c,[x+11*side,29],[x, y-12],10,'#7ad1aa');
       box(c,x-6,y-13,13,5,mint);
-      box(c,x-8,y-8,17,13,ink);box(c,x-6,y-7,13,11,skin);
-      for(let j=0;j<4;j++) box(c,x-6+j*4,y+3,3,4,j===1?gold:skin);
-      box(c,x+7*side-2,y-8,5,7,skin);
+      box(c,x-8,y-8,17,13,ink);box(c,x-6,y-7,13,11,glove);
+      for(let j=0;j<4;j++) box(c,x-6+j*4,y+3,3,4,j===1?gold:glove);
+      box(c,x+7*side-2,y-8,5,7,glove);
       return;
     }
     for(let side=0;side<2;side++) {
@@ -221,15 +231,15 @@
       box(c,base+21,20,20,palmY-20,ink);box(c,base+23,21,16,palmY-20,'#7ad1aa');
       box(c,base+22,palmY-15,18,4,'#b0f3bf');
       polygon(c,[[base+9,palmY],[base+18,palmY-14],[base+44,palmY-14],[base+54,palmY],[base+54,palmY+7],[base+7,palmY+7]],ink);
-      polygon(c,[[base+11,palmY],[base+19,palmY-11],[base+43,palmY-11],[base+51,palmY],[base+51,palmY+4],[base+10,palmY+4]],skin);
+      polygon(c,[[base+11,palmY],[base+19,palmY-11],[base+43,palmY-11],[base+51,palmY],[base+51,palmY+4],[base+10,palmY+4]],glove);
       for(let f=0;f<5;f++) {
         const i=side*5+f, active=i===target, tipX=base+f*keyWidth+6;
         const finger=side?4-f:f;
         const lengths=[14,19,21,18,12];
         const tipY=palmY+6+lengths[finger]+(active?round(p.press*13):0);
         const root=[base+10+f*11,palmY+2], end=[tipX,tipY];
-        segment(c,root,end,8,ink);segment(c,root,end,5,active?mint:skin);
-        box(c,tipX-1,tipY,3,2,active?gold:'#e2aa92');
+        segment(c,root,end,8,ink);segment(c,root,end,5,active?mint:glove);
+        box(c,tipX-1,tipY,3,2,active?gold:'#c4ecae');
       }
       if (Math.floor(target/5)===side) {
         const tipX=left+target*keyWidth+6;
@@ -255,7 +265,7 @@
     if(canvas.height!==H) canvas.height=H;
     c.imageSmoothingEnabled=false;
     const seconds=Math.max(0,Number.isFinite(elapsedSeconds)?elapsedSeconds:0);
-    const f=frame(steps,seconds);
+    const f=liveFrame(id,steps,frame(steps,seconds),snapshot);
     backdrop(c);
     const input=snapshot?.challenge?.piano_input || snapshot?.challenge?.visual?.piano_input;
     const wrist=id==='piano' && (input==='wrists' || input==='wrist');
@@ -264,8 +274,16 @@
       const demoKeys=[1,7,4,6];
       keyboard(c,f,Number.isInteger(target)&&target>=0&&target<10?target:demoKeys[f.loops%demoKeys.length],wrist);
     } else {
-      person(c,id,f.sample);
+      c.save();
+      // Show the waving arm on the same screen side as the player's raised wrist.
+      if (id==='wave' && snapshot?.challenge?.tracking) {
+        const p=snapshot.pose_points || [];
+        const raised=side=>p[11+side] && p[15+side] && p[15+side][1]<p[11+side][1];
+        if (raised(0) && !raised(1)) {c.translate(W,0);c.scale(-1,1);}
+      }
+      demoAvatar(c,id,f.sample);
       prompts(c,id,f);
+      c.restore();
     }
     footer(c,steps,f,wrist);
   }

@@ -13,14 +13,14 @@
       title:"月台挥手", short:"PLATFORM WAVE", mark:"03", art:"wave", color:"#8ee0cf",
       target:10, limit:25, unit:"位乘客",
       brief:"举起小电的手，左右交替挥动，送别十位乘客。",
-      hint:"按 ←、→ 或点左右挥手。看腕带的指向，每次挥到另一侧就送走一位。",
+      hint:"按 ←、→ 或点下方亮起的方向，小电会抬起一只手在脸旁左右挥。每换一侧就送走一位。",
       pads:[["←","向左挥"],["→","向右挥"]], keys:["arrowleft","arrowright"],
     },
     hands_up: {
       title:"仙人掌跳跃", short:"CACTUS RUN", mark:"06", art:"hands_up", color:"#f8b58c",
       target:5, limit:30, unit:"个障碍",
       brief:"让仙人掌靠近脚边再起跳，越过五个就通关。",
-      hint:"按空格或点「起跳」。小电落地后才能开始下一跳，仙人掌经过时双脚要高过尖刺。",
+      hint:"仙人掌靠近时按空格或点「起跳」，小电会提肩腾空。等双脚落地，再准备下一跳。",
       pads:[["Space","起跳"]], keys:[" "],
     },
     turn: {
@@ -44,7 +44,7 @@
 
   function init() {
     return {raised:false, side:0, left:0, right:0, down:false, downAt:0, lastWave:1,
-      jumpTime:JUMP_DURATION, obstacleTime:0, judged:false, stage:null};
+      jumpTime:JUMP_DURATION, obstacleTime:0, judged:false};
   }
   function jumpHeight(s) {
     return 51*Math.sin(Math.PI*Math.min(1,s.extra.jumpTime/JUMP_DURATION));
@@ -70,22 +70,20 @@
       default: return "下一步 · " + s.config.pads[wanted(s)][1];
     }
   }
-  function press(s, i, award, tone) {
+  function press(s, i, award) {
     const e=s.extra;
     switch (s.id) {
       case "flap":
-        if (i===0) { if (!e.raised) tone(410); e.raised=true; }
+        if (i===0) e.raised=true;
         else if (e.raised) {
           e.raised=false;
           award(true,100,"向上飞了一层！");
-          tone(530+s.hits*24);
         } else award(false,0,"先抬翼，再压下");
         break;
       case "wave":
         if (i!==e.lastWave) {
           e.lastWave=i;
           award(true,90,"再见！送走一位乘客");
-          tone(i ? 520 : 420);
         } else award(false,0,"向另一边挥手");
         break;
       case "turn":
@@ -94,7 +92,6 @@
           if (e[direction]<3) {
             e[direction]++;
             award(true,100,(e.side<0?"左":"右")+"侧信号灯点亮");
-            tone(430+e[direction]*50);
           } else award(false,0,"这一侧已满，转向另一侧");
           e.side=0;
         } else if (i!==1 && !e.side) {
@@ -107,19 +104,17 @@
           if (i!==1) break;
           const ready=s.elapsed-e.downAt>=.35;
           award(ready,100,ready?"回正，点亮一级！":"抬早了，绿灯亮起再抬头");
-          tone(ready?425+s.hits*45:175);
           e.down=false;
         }
         break;
       case "hands_up":
         if (e.jumpTime>=JUMP_DURATION) {
           e.jumpTime=0;
-          tone(635,.12);
         }
         break;
     }
   }
-  function tick(s, dt, award, tone) {
+  function tick(s, dt, award) {
     if (s.id!=="hands_up") return;
     const e=s.extra, before=e.obstacleTime;
     e.obstacleTime+=dt;
@@ -131,41 +126,113 @@
       const t=Math.min(JUMP_DURATION,jumpBefore+CROSSING-before);
       const passed=51*Math.sin(Math.PI*t/JUMP_DURATION)>25;
       award(passed,120,passed?"越过仙人掌！":"碰到尖刺，试试下一株");
-      tone(passed?640:165);
     }
     if (e.obstacleTime>=NEXT_CACTUS) {
       e.obstacleTime-=NEXT_CACTUS;
       e.judged=false;
     }
   }
-  function draw(ctx,s) {
-    const e=s.extra;
-    if (!e.stage) e.stage=document.createElement("canvas");
-    const points=Array(25).fill(null);
-    points[0]=[.5,.32];
-    points[11]=[.42,.51]; points[12]=[.58,.51];
-    points[13]=[.40,.59]; points[14]=[.60,.59];
-    points[15]=[.41,.67]; points[16]=[.59,.67];
-    const visual={left_got:e.left,right_got:e.right};
-    if (s.id==="flap") {
-      points[13]=[.34,e.raised?.44:.54]; points[14]=[.66,e.raised?.44:.54];
-      points[15]=[.24,e.raised?.36:.60]; points[16]=[.76,e.raised?.36:.60];
-      visual.alt=56*s.hits/s.config.target;
-    } else if (s.id==="wave") {
-      points[14]=[.63,.45]; points[16]=[e.lastWave?.71:.57,.27];
-    } else if (s.id==="turn") {
-      points[0][0]+=e.side*.12;
-    } else if (s.id==="nod") {
-      points[0][1]=e.down?.51:.28;
-    } else if (s.id==="hands_up") {
-      visual.avatar_dy=-jumpHeight(s);
-      visual.obs=160+(CROSSING-e.obstacleTime)*81;
+  // Angles start at the outward horizontal, like the front-facing action guide.
+  const restingArms = [69,77,69,77];
+  const aspect = 16 / 9;
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+  function newAvatar() {
+    return {arms:restingArms.slice(), lean:0, lift:0, yaw:0, dip:0, keyboardX:0, stage:null};
+  }
+  function poseTarget(s) {
+    const e = s.extra;
+    const target = {arms:restingArms, lean:0, lift:0, yaw:0, dip:0, keyboardX:0};
+    const sincePress = s.elapsed - s.pressAt;
+    switch (s.moveId) {
+      case "wings":
+        if (sincePress < .52) target.arms = [0,0,0,0];
+        break;
+      case "flap":
+        target.arms = e.raised ? [-32,-38,-32,-38] : [28,32,28,32];
+        break;
+      case "wave":
+        target.arms = [69,77,-25,e.lastWave ? -52 : -128];
+        break;
+      case "lean":
+        target.lean = s.lane - 1;
+        target.arms = [54,68,54,68];
+        break;
+      case "piano": {
+        const pressed = s.lastKey >= 0 && sincePress < .22;
+        const key = pressed ? s.lastKey : s.notes[s.hits] ?? s.lastKey;
+        const left = key < 2;
+        const arm = pressed ? [26,62] : [-9,27];
+        target.arms = left ? [...arm,68,76] : [68,76,...arm];
+        // Place the playing hand over the corresponding A/S/D/F key.
+        target.keyboardX = 65 + 62 * key + (left ? 29 : -29);
+        break;
+      }
+      case "hands_up":
+        target.lift = jumpHeight(s)/51;
+        target.arms = [69,77-25*target.lift,69,77-25*target.lift];
+        break;
+      case "turn": target.yaw = e.side; break;
+      case "nod": target.dip = e.down ? 1 : 0; break;
     }
-    window.MotionStage.paint(e.stage,{phase:"round",sub:"play",act_id:s.id,
-      pose_aspect:16/9,pose_points:points,challenge:{frac:s.hits/s.config.target,visual}});
-    // Keep the stage proportions while trimming its decorative skyline.
-    ctx.drawImage(e.stage,0,52,384,151,0,0,320,126);
+    return target;
+  }
+  function animate(s, dt) {
+    const a = s.avatar, target = poseTarget(s);
+    const blend = reduced?.matches || dt===null ? 1 : 1-Math.exp(-dt*22);
+    for (let i=0;i<4;i++) a.arms[i] += (target.arms[i]-a.arms[i])*blend;
+    for (const key of ["lean","lift","yaw","dip","keyboardX"]) {
+      a[key] += (target[key]-a[key])*blend;
+    }
+  }
+  function joint(origin, direction, angle, length) {
+    const radians = angle*Math.PI/180;
+    return [origin[0]+direction*length*Math.cos(radians)/aspect, origin[1]+length*Math.sin(radians)];
+  }
+  function snapshot(s) {
+    const a = s.avatar, e = s.extra;
+    const points = Array(25).fill(null);
+    const center = .5 + .065*a.lean, shoulders = .51 - .055*a.lift;
+    points[0] = [center + .07*a.lean + .12*a.yaw, shoulders - .19 + .13*a.dip];
+    for (let side=0;side<2;side++) {
+      const direction = side ? 1 : -1;
+      const shoulder = [center + direction*.08, shoulders - direction*a.lean*.028];
+      const elbow = joint(shoulder,direction,a.arms[side*2],.15);
+      points[11+side] = shoulder;
+      points[13+side] = elbow;
+      points[15+side] = joint(elbow,direction,a.arms[side*2+1],.15);
+      points[23+side] = [.5 + direction*.065, .8];
+    }
+    const visual = {};
+    switch (s.moveId) {
+      case "lean": visual.avatar_dx = a.lean*58; break;
+      case "turn":
+        visual.head_turn = a.yaw;
+        visual.left_got = e.left;
+        visual.right_got = e.right;
+        break;
+      case "nod": visual.head_dip = a.dip; break;
+      case "flap": visual.alt = 56*s.hits/s.config.target; break;
+      case "hands_up":
+        visual.shoulder_lift = a.lift;
+        visual.avatar_dy = -jumpHeight(s);
+        visual.obs = 160+(CROSSING-e.obstacleTime)*81;
+        break;
+    }
+    return {phase:"round",sub:"play",act_id:s.moveId,pose_aspect:aspect,pose_points:points,
+      challenge:{frac:s.hits/s.config.target,visual}};
+  }
+  function draw(ctx,s) {
+    const stage = s.avatar.stage ||= document.createElement("canvas");
+    window.MotionStage.paint(stage,snapshot(s));
+    if (s.moveId==="wings") {
+      ctx.drawImage(stage,0,73,384,120,0,0,320,100);
+    } else if (s.moveId==="hands_up" || s.moveId==="flap") {
+      ctx.drawImage(stage,0,32,384,170,0,0,320,126);
+    } else {
+      ctx.drawImage(stage,0,52,384,151,0,0,320,126);
+    }
     if (s.id==="nod") {
+      const e = s.extra;
       const fraction=e.down?Math.min(1,(s.elapsed-e.downAt)/.35):0;
       ctx.fillStyle="#262638";
       ctx.fillRect(139,8,42,9);
@@ -175,5 +242,5 @@
       }
     }
   }
-  window.ExtraCartridges = {games,init,press,tick,objective,wanted,draw};
+  window.ExtraCartridges = {games,init,press,tick,objective,wanted,newAvatar,animate,snapshot,draw};
 })();

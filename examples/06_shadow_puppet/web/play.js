@@ -8,14 +8,14 @@
       title: "天台展翅", short: "ROOFTOP", mark: "01", art: "rooftop",
       color: "#d6bcff", target: 5, limit: 25, unit: "节拍",
       brief: "光标进入绿色节拍区时，帮小电展开双翼。",
-      hint: "看准绿色区段，按空格或点击「展翅」。越靠近中心，得分越高。",
+      hint: "光标到绿区时，按空格或点「展翅」，小电会把双臂平举到肩高。越靠近绿区中心，得分越高。",
       pads: [["Space", "展翅"]],
     },
     alpine: {
       title: "雪岭穿梭", short: "ALPINE", mark: "04", art: "alpine",
       color: "#9ef3dc", target: 6, limit: 18, unit: "旗门",
       brief: "提前切到旗门所在雪道，让小电穿过六面旗。",
-      hint: "用左右方向键换道，或点击下方雪道。旗门抵达小电脚下时判定。",
+      hint: "按左右方向键或点选雪道，小电会向那一侧倾身。旗门到脚下时，站在同一道就算通过。",
       pads: [["1", "左道"], ["2", "中道"], ["3", "右道"]],
     },
     synth: {
@@ -32,13 +32,12 @@
   const catalog = Object.freeze(Object.entries(motionToCartridge).map(([moveId,id]) => Object.freeze({
     id,moveId,title:games[id].title,art:games[id].art,short:games[id].short,
   })));
-  const pitches = [261.63, 329.63, 392, 523.25];
   const lanes = ["左道", "中道", "右道"];
   const art = new Map();
   const key = "desk-arcade.history.v1";
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   const W = 320, H = 126;
-  let dialog, shell, closeButton, session, refs, raf, audio, pressedTimer;
+  let dialog, shell, closeButton, session, refs, raf, arcadeScene, pressedTimer;
   let history = [];
   let stats = {day: "", runs: 0, best: 0, played: []};
 
@@ -159,15 +158,20 @@
       if (document.hidden && session && ["countdown", "playing"].includes(session.phase)) pause();
     });
   }
-  function teardown() {
+  function teardown(restoreAudio = true) {
     cancelAnimationFrame(raf);
     clearTimeout(pressedTimer);
     session = null;
     refs = null;
+    if (restoreAudio && arcadeScene) {
+      arcadeScene = null;
+      if (window.DeskAudio?.restoreScene) window.DeskAudio.restoreScene();
+      else window.DeskAudio?.scene("lobby");
+    }
   }
-  function frame(title, tagline, mark, accent) {
+  function frame(title, tagline, mark, accent, keepScene = false) {
     initDialog();
-    teardown();
+    teardown(!keepScene);
     dialog.replaceChildren();
     dialog.style.setProperty("--dp-accent", accent);
     shell = el("div", "dp-shell");
@@ -195,16 +199,19 @@
   function open(id) {
     if (!Object.hasOwn(games, id)) return;
     const config = games[id];
-    const actions = frame(config.title, "RE:CHARGE ARCADE / " + config.short, config.mark, config.color);
+    const moveId = catalog.find(game => game.id === id).moveId;
+    const actions = frame(config.title, "RE:CHARGE ARCADE / " + config.short, config.mark, config.color, true);
+    arcadeScene = moveId;
+    window.DeskAudio?.scene(moveId);
     picture(config.art);
-    picture("bot");
     session = {
-      id, config, phase: "brief", elapsed: 0, countdown: 0, last: 0, hits: 0,
+      id, moveId, config, avatar: extra.newAvatar(), pressAt: -10, phase: "brief", elapsed: 0, countdown: 0, last: 0, hits: 0,
       score: 0, combo: 0, flash: 0, good: true, cooldown: 0, cursor: .13,
       zone: .64, lane: 1, laneDraw: 1, gate: 0, gateTime: 0, lastKey: -1,
       gateLanes: [0, 2, 1, 0, 1, 2], notes: [0, 1, 2, 1, 3, 2, 1, 0],
     };
     if (Object.hasOwn(extra.games,id)) session.extra = extra.init();
+    extra.animate(session,null);
     const pauseButton = button("dp-icon", "Ⅱ", () => {
       if (!session) return;
       if (session.phase === "paused") resume(); else pause();
@@ -271,30 +278,9 @@
       action.focus({preventScroll:true});
     }
   }
-  function unlockAudio() {
-    if (!window.deskSoundEnabled?.()) return;
-    try {
-      const Context = window.AudioContext || window.webkitAudioContext;
-      if (!Context) return;
-      audio ||= new Context();
-      if (audio.state === "suspended") audio.resume().catch(() => {});
-    } catch { /* Audio can be unavailable on embedded browsers. */ }
-  }
-  function tone(frequency, duration = .085, shape = "triangle") {
-    if (!audio || audio.state !== "running" || !window.deskSoundEnabled?.()) return;
-    const osc = audio.createOscillator();
-    const gain = audio.createGain();
-    osc.type = shape;
-    osc.frequency.value = frequency;
-    gain.gain.setValueAtTime(.04, audio.currentTime);
-    gain.gain.exponentialRampToValueAtTime(.001, audio.currentTime + duration);
-    osc.connect(gain).connect(audio.destination);
-    osc.start();
-    osc.stop(audio.currentTime + duration);
-  }
   function start() {
     if (session?.phase !== "brief") return;
-    unlockAudio();
+    window.DeskAudio?.cue("start");
     session.phase = "countdown";
     session.countdown = 3;
     showCover("3", "跟上小电的节奏");
@@ -311,6 +297,7 @@
     if (!session || !["countdown","playing"].includes(session.phase)) return;
     session.resumePhase = session.phase;
     session.phase = "paused";
+    window.DeskAudio?.scene(null);
     cancelAnimationFrame(raf);
     refs.pauseButton.textContent = "▶";
     refs.pauseButton.setAttribute("aria-label", "继续挑战");
@@ -319,8 +306,8 @@
   }
   function resume() {
     if (session?.phase !== "paused") return;
-    unlockAudio();
     session.phase = session.resumePhase;
+    window.DeskAudio?.scene(arcadeScene);
     refs.pauseButton.textContent = "Ⅱ";
     refs.pauseButton.setAttribute("aria-label", "暂停挑战");
     if (session.phase === "countdown") showCover(String(Math.ceil(session.countdown)), "跟上小电的节奏");
@@ -365,22 +352,23 @@
       s.hits++;
       s.score += points + Math.min(5, s.combo - 1) * 10;
     }
+    if (success && s.id === "synth") window.DeskAudio?.note(s.lastKey);
+    else window.DeskAudio?.cue(success ? "hit" : "miss");
     tell(message);
   }
   function input(index) {
     const s = session;
     if (!s || s.phase !== "playing") return;
-    unlockAudio();
     refs.controls.forEach((pad, i) => pad.classList.toggle("dp-pressed", i === index));
     clearTimeout(pressedTimer);
     pressedTimer = setTimeout(() => refs?.controls?.forEach(p => p.classList.remove("dp-pressed")), 145);
     if (s.extra) {
-      extra.press(s,index,award,tone);
+      extra.press(s,index,award);
     } else if (s.id === "rooftop" && s.cooldown <= 0) {
+      s.pressAt = s.elapsed;
       const distance = Math.abs(s.cursor - s.zone);
       const hit = distance <= .125;
       award(hit, distance < .055 ? 120 : 80, hit ? (distance < .055 ? "完美节拍！" : "展翅成功！") : "早了一点？瞄准绿区再试");
-      tone(hit ? 523 + 36 * s.combo : 174);
       if (hit) s.zone = [.31,.76,.42,.64][(s.hits - 1) % 4];
       s.cooldown = .26;
     } else if (s.id === "alpine") {
@@ -388,11 +376,12 @@
     } else if (s.id === "synth" && s.cooldown <= 0) {
       const hit = index === s.notes[s.hits];
       s.lastKey = index;
+      s.pressAt = s.elapsed;
       award(hit, 100, hit ? "合拍！" : "再试一次，跟着亮键弹");
-      tone(pitches[index], .2);
       s.cooldown = .11;
     }
     if (s.hits >= s.config.target && s.id !== "alpine") return finish();
+    extra.animate(s,1/60);
     syncUi();
     paint();
   }
@@ -409,10 +398,8 @@
         refs.cover.hidden = true;
         refs.controls.forEach(p => { p.disabled = false; });
         refs.controls[0].focus({preventScroll:true});
-        tone(660, .12);
       } else if (Math.ceil(s.countdown) !== old) {
         refs.cover.firstElementChild.textContent = String(Math.ceil(s.countdown));
-        tone(390);
       }
     } else if (s.phase === "playing") {
       s.elapsed += dt;
@@ -420,7 +407,7 @@
       s.flash = Math.max(0, s.flash - dt * 1.8);
       s.cursor = .5 + .46 * Math.sin(s.elapsed * 2.85 - 1);
       if (s.extra) {
-        extra.tick(s,dt,award,tone);
+        extra.tick(s,dt,award);
         if (s.hits>=s.config.target) return finish();
       }
       if (s.id === "alpine") {
@@ -429,13 +416,13 @@
         if (s.gateTime >= 2.85) {
           const hit = s.lane === s.gateLanes[s.gate];
           award(hit, 100, hit ? "穿过旗门！" : "错过旗门，瞄准下一旗");
-          tone(hit ? 620 : 192);
           s.gate++;
           s.gateTime -= 2.85;
           if (s.gate >= s.config.target) return finish();
         }
       }
       if (s.elapsed >= s.config.limit) return finish();
+      extra.animate(s,dt);
     } else return;
     syncUi();
     paint();
@@ -469,6 +456,7 @@
   }
   function finish() {
     const s = session;
+    window.DeskAudio?.cue(s.hits >= s.config.target ? "reward" : "fail");
     const result = {id:s.id, title:s.config.title, score:s.score, cleared:s.hits,
       total:s.config.target, seconds:Math.ceil(Math.min(s.elapsed, s.config.limit)), at:Date.now(), mode:"arcade"};
     recordResult(result);
@@ -491,72 +479,53 @@
     box(ctx, color, x-size, y, size*2+1, 1);
     box(ctx, color, x, y-size, 1, size*2+1);
   }
-  function bot(ctx, x, y, pose, frame = 0, allowImage = true) {
-    ctx.save();
-    ctx.translate(Math.round(x), Math.round(y));
+  function posterBot(ctx) {
     const ink = "#17283a", mint = "#b4ffc6", shade = "#66c6ae", light = "#e1ffe2";
-    if (pose === "glide") {
-      for (const d of [-1,1]) {
-        for (let i = 0; i < 5; i++) {
-          const yy = -12 - i * (1 + frame);
-          box(ctx, ink, d * (11+i*3)-3, yy-1, 7, 5);
-          box(ctx, i%2 ? shade : mint, d * (11+i*3)-2, yy, 5, 3);
-        }
+    for (const d of [-1,1]) {
+      for (let i = 0; i < 5; i++) {
+        const yy = -12 - i*2;
+        box(ctx, ink, d * (11+i*3)-3, yy-1, 7, 5);
+        box(ctx, i%2 ? shade : mint, d * (11+i*3)-2, yy, 5, 3);
       }
     }
-    const sprite = allowImage ? picture("bot") : null;
-    if (sprite?.complete && sprite.naturalWidth) {
-      ctx.drawImage(sprite, -15, -32, 30, 36);
-    } else {
-      box(ctx, ink, -8, -9, 16, 10);
-      box(ctx, shade, -6, -8, 12, 7);
-      box(ctx, mint, -5, -7, 8, 5);
-      box(ctx, "#f39968", -3, -5, 3, 2);
-      box(ctx, ink, -7, 0, 5, 3); box(ctx, ink, 3, 0, 5, 3);
-      box(ctx, ink, -12, -23, 24, 13);
-      box(ctx, ink, -9, -26, 18, 18);
-      box(ctx, shade, -10, -22, 20, 11);
-      box(ctx, mint, -8, -24, 16, 14);
-      box(ctx, light, -8, -24, 14, 2);
-      box(ctx, ink, -8, -21, 16, 8);
-      box(ctx, "#edfbd4", -5, -19, 2, 3); box(ctx, "#edfbd4", 3, -19, 2, 3);
-      box(ctx, ink, -2, -29, 3, 4); box(ctx, "#ffae69", -3, -31, 4, 3);
-      box(ctx, "#7ed5c3", -13, -20, 3, 6); box(ctx, "#7ed5c3", 10, -20, 3, 6);
-    }
-    if (pose === "ski") {
-      box(ctx, "#ffe29c", -14, 2, 12, 2); box(ctx, "#ffe29c", 3, 2, 12, 2);
-      box(ctx, "#384453", -12, -9, 2, 11); box(ctx, "#384453", 11, -9, 2, 11);
-    }
-    ctx.restore();
+    box(ctx, ink, -8, -9, 16, 10);
+    box(ctx, shade, -6, -8, 12, 7);
+    box(ctx, mint, -5, -7, 8, 5);
+    box(ctx, "#f39968", -3, -5, 3, 2);
+    box(ctx, ink, -7, 0, 5, 3); box(ctx, ink, 3, 0, 5, 3);
+    box(ctx, ink, -12, -23, 24, 13);
+    box(ctx, ink, -9, -26, 18, 18);
+    box(ctx, shade, -10, -22, 20, 11);
+    box(ctx, mint, -8, -24, 16, 14);
+    box(ctx, light, -8, -24, 14, 2);
+    box(ctx, ink, -8, -21, 16, 8);
+    box(ctx, "#edfbd4", -5, -19, 2, 3); box(ctx, "#edfbd4", 3, -19, 2, 3);
+    box(ctx, ink, -2, -29, 3, 4); box(ctx, "#ffae69", -3, -31, 4, 3);
+    box(ctx, "#7ed5c3", -13, -20, 3, 6); box(ctx, "#7ed5c3", 10, -20, 3, 6);
   }
-  function background(ctx, id) {
-    const image = picture(id);
+  function background(ctx, id, cover = false) {
+    const image = picture(!cover && id === "synth" ? "stage-plates" : id);
     const colors = id === "alpine" ? ["#3f7893","#90d9ca"] : id === "synth" ? ["#5a365d","#e58984"] : ["#292845","#68619a"];
     const grad = ctx.createLinearGradient(0,0,0,H);
     grad.addColorStop(0, colors[0]); grad.addColorStop(1, colors[1]);
     ctx.fillStyle = grad;
     ctx.fillRect(0,0,W,H);
     if (image.complete && image.naturalWidth) {
-      if (Object.hasOwn(extra.games,id)) {
+      if (cover) {
         const scale=Math.max(W/image.naturalWidth,H/image.naturalHeight);
         const width=W/scale, height=H/scale;
         ctx.drawImage(image,(image.naturalWidth-width)/2,(image.naturalHeight-height)/2,width,height,0,0,W,H);
       } else if (id === "alpine") {
         ctx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight*.26, 0, 0, W, 56);
-      } else {
-        ctx.drawImage(image, 0, 0, W, id === "rooftop" ? 96 : 91);
+      } else if (id === "synth") {
+        ctx.drawImage(image,384,216,384,216,0,0,W,85);
       }
     } else {
       for (let i=0;i<20;i++) star(ctx,(i*73+27)%W,(i*13+4)%62,"#d4cece",i%3===0?1:0);
     }
   }
   function rooftop(ctx,s) {
-    const image = picture("rooftop");
-    if (!image.complete || !image.naturalWidth) {
-      box(ctx,"#282c48",0,82,W,13);
-      box(ctx,"#9188aa",0,82,W,2);
-      bot(ctx,160,79,"glide",s.good ? s.flash : 0);
-    }
+    extra.draw(ctx,s);
     box(ctx,"#202538",0,95,W,H-95);
     if (s.flash > .1 && s.good) {
       const spread = reducedMotion ? 6 : 18*(1-s.flash);
@@ -616,12 +585,16 @@
     box(ctx,"#ffe3a2",x-rw,y-ht,2*rw,2);
     const playerX=laneX(s.laneDraw,1);
     box(ctx,"#8bb8bd",playerX-13,111,27,3);
-    bot(ctx,playerX,107,"ski");
+    window.MotionStage.paintAvatar(ctx,extra.snapshot(s),playerX,107,.57);
+    box(ctx,"#bd7669",playerX-16,109,15,2);
+    box(ctx,"#bd7669",playerX+1,109,15,2);
+    box(ctx,"#ffdf9d",playerX+14,107,3,2);
     if(s.flash>.1 && s.good) star(ctx,playerX+18,72,"#fff4bc",2);
   }
   function synth(ctx,s) {
     box(ctx,"#422e44",0,79,W,47);
     box(ctx,"#f0a993",0,79,W,2);
+    window.MotionStage.paintAvatar(ctx,extra.snapshot(s),s.avatar.keyboardX,78,.64);
     const current=s.notes[s.hits];
     // A four-step phrase preview scrolls across the sequencer.
     for(let i=0;i<4;i++) {
@@ -637,7 +610,7 @@
       }
     }
     for(let i=0;i<4;i++) {
-      const x=36+i*62, active=i===current, down=s.lastKey===i && s.flash>.75;
+      const x=36+i*62, active=i===current, down=s.lastKey===i && s.elapsed-s.pressAt<.22;
       box(ctx,"#24283b",x,73,60,41);
       box(ctx,down?"#ffb77d":active?"#baffad":"#d2bac2",x+2,75+Number(down)*2,56,33);
       box(ctx,active?"#649474":"#987f95",x+2,107,56,4);
@@ -647,6 +620,10 @@
       ctx.textAlign="center";
       ctx.fillText("ASDF"[i],x+29,99);
       if(active) star(ctx,x+29,81,"#546b57",2);
+      if(down) {
+        box(ctx,"#344653",x+25,74,8,3);
+        box(ctx,"#bdf2aa",x+26,73,6,3);
+      }
     }
   }
   function paint() {
@@ -655,11 +632,14 @@
     if (!s || !ctx) return;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    if (s.extra && s.phase!=="brief") extra.draw(ctx,s);
-    else background(ctx,s.id);
-    if (s.id === "rooftop") rooftop(ctx,s);
-    if (s.id === "alpine") alpine(ctx,s);
-    if (s.id === "synth") synth(ctx,s);
+    if (s.phase==="brief") background(ctx,s.id,true);
+    else if (s.extra) extra.draw(ctx,s);
+    else if (s.id === "rooftop") rooftop(ctx,s);
+    else {
+      background(ctx,s.id);
+      if (s.id === "alpine") alpine(ctx,s);
+      if (s.id === "synth") synth(ctx,s);
+    }
     ctx.restore();
   }
 
@@ -668,7 +648,7 @@
     if (!r) return;
     const isMotion = r.mode !== "arcade";
     const name = resultArt(r);
-    frame("回血战报", "RE:CHARGE ARCADE / RESULT", "★", "#bdff98");
+    frame("回血战报", "RE:CHARGE ARCADE / RESULT", "★", "#bdff98", session?.id === r.id);
     const body = el("div", "dp-result");
     const poster = el("div", "dp-poster");
     poster.style.setProperty("--dp-poster-art", "url('art/" + name + ".png')");
@@ -799,7 +779,7 @@
       ctx.save();
       ctx.translate(380,385);
       ctx.scale(5,5);
-      bot(ctx,0,0,"glide",1,false);
+      posterBot(ctx);
       ctx.restore();
       for(let i=0;i<22;i++)star(ctx,80+i*137%640,185+i*31%230,"#b7aee1",2);
     }

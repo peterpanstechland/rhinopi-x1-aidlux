@@ -41,7 +41,7 @@ from pixel_ui import (
 STAGE_H = 120
 GROUND = 106
 AV_X = 160
-# Steve body below shoulders = 36; shoes land on GROUND
+# Anchor the robot's feet to the collision ground.
 AV_SH_Y = GROUND - 36
 
 # downhill ski run: items fall toward the skier, who slides left/right
@@ -56,7 +56,7 @@ CACTUS_W = 18
 DINO_SPEED = 78.0
 JUMP_V = -240.0   # higher leap so you clearly clear the cactus
 JUMP_G = 520.0
-DINO_HIT_HALF = 16  # steve + cactus overlap half-width
+DINO_HIT_HALF = 16  # Half-width of the player and cactus overlap.
 
 # piano: ten keys for ten fingers — each finger owns exactly one key
 FINGERS_PER_HAND = 5
@@ -128,7 +128,6 @@ class Stage:
         self.jump_flash = 0.0
         self.hands_up = 0.0
         self.jump_ready = True
-        self.wing_beat = 0.0
         self.falling = False
         self.left_fill = 0.0
         self.right_fill = 0.0
@@ -174,7 +173,6 @@ class Stage:
         self.jump_flash = 0.0
         self.hands_up = 0.0
         self.jump_ready = True
-        self.wing_beat = 0.0
         self.falling = False
         self.left_fill = 0.0
         self.right_fill = 0.0
@@ -196,7 +194,7 @@ class Stage:
             return (self.left_got + self.right_got) / (2 * self.need)
         return min(1.0, self.got / max(self.need, 0.01))
 
-    def challenge_snapshot(self, *, include_visual: bool) -> dict:
+    def challenge_snapshot(self, *, include_visual: bool, motion: Motion | None = None, nod_dipped: bool = False) -> dict:
         is_turn = self.scene == "turn"
         count = self.left_got + self.right_got if is_turn else self.got
         snapshot = {
@@ -226,6 +224,20 @@ class Stage:
                 "left_got": int(self.left_got),
                 "right_got": int(self.right_got),
             }
+            if self.tracking and motion is not None:
+                visual = snapshot["visual"]
+                if self.scene == "turn":
+                    visual["head_turn"] = round(max(-1.0, min(1.0, motion.turn_dir / .38)), 3)
+                elif self.scene == "nod":
+                    visual["head_dip"] = float(nod_dipped)
+                elif self.scene == "piano":
+                    if self.piano_input == "wrists":
+                        visual["aim_keys"] = [self._key_at(x) for x in (motion.piano_lx, motion.piano_rx)]
+                    else:
+                        visual["finger_depth"] = [
+                            round(float(press), 2) if key in self.press_base else None
+                            for key, press in enumerate(self.finger_press)
+                        ]
         return snapshot
 
     @property
@@ -382,7 +394,6 @@ class Stage:
     def _sim_eagle(self, motion: Motion, hands, dt: float) -> None:
         """Fly: T-pose wings out + keep flapping. Unlike jump — no chair-bounce."""
         dt = min(float(dt), 0.08)
-        self.wing_beat = float(motion.flap)
         # must look like wings (horizontal reach), not "hands up" jump
         open_wings = motion.wings >= 0.32 or (motion.wing_l + motion.wing_r) * 0.5 >= 0.38
         flapping = motion.flap >= 0.22 and (open_wings or motion.wings >= 0.22)
@@ -492,13 +503,13 @@ class Stage:
         shoe = -self.avatar_dy  # how high the feet are
         self.obs -= DINO_SPEED * dt
 
-        # overlap band while cactus crosses Steve
+        # Overlap band while the cactus crosses the player.
         half = DINO_HIT_HALF + CACTUS_W // 2
         overlapping = abs(self.obs - AV_X) <= half
         if overlapping:
             self.air_over = max(self.air_over, shoe)
         elif self.obs < AV_X - half and not self.obs_cleared:
-            # cactus just finished passing Steve — judge the leap
+            # Judge the leap when the cactus clears the player.
             self.obs_cleared = True
             if self.air_over >= CACTUS_H - 2:
                 self._tick("越过仙人掌")
@@ -625,7 +636,7 @@ class Stage:
             key = self._key_at(nx)
             hit(key, key == self.target_key)
 
-        # Steve stays put; only the fingers play
+        # Keep the body seated while the fingers play.
         self.avatar_dx = 0.0
         self.avatar_dy = 0.0
 
@@ -640,7 +651,7 @@ class Stage:
     # ---------- draw helpers ----------
 
     def _draw_cactus(self, scr: PixelScreen, x: int, ground: int, h: int = CACTUS_H) -> None:
-        """Chunky cactus ~Steve-leg height so the runner reads as a game."""
+        """Draw a short cactus at the player's feet."""
         trunk = 10
         tx = x - trunk // 2
         scr.rect(tx - 1, ground - h - 1, trunk + 2, h + 2, NIGHT)
@@ -726,7 +737,7 @@ class Stage:
         scr.seg_bar(114, 104, 92, 6, self.frac, LIME if hit else YELLOW, seg=5)
 
     def _bg_eagle(self, scr: PixelScreen) -> None:
-        """Steve stays put; the sky rushing down is what reads as climbing."""
+        """Scroll the sky down as the player climbs."""
         high = self.alt / max(EAGLE_MAX_ALT, 1.0)
         scr.rect(0, 0, scr.lw, STAGE_H, AZURE)
         if high > 0.35:
@@ -771,37 +782,11 @@ class Stage:
         scr.rect(x + 1, y + 1, 2, 1, WHITE)
 
     def _draw_tiny_bird(self, scr: PixelScreen, x: int, y: int, phase: int = 0) -> None:
-        """Background flock bird — two-pixel wings, not a second Steve."""
+        """Draw a small background bird with two-pixel wings."""
         flap = 1 if (int(self.scroll) + phase) % 2 == 0 else 0
         scr.rect(x + 2, y + 1, 2, 1, NIGHT)
         scr.rect(x, y + flap, 3, 1, SLATE)
         scr.rect(x + 3, y + flap, 3, 1, SLATE)
-
-    def draw_wings(self, scr: PixelScreen, ax: int, ay: int) -> None:
-        """Bird wings: four stacked feathers per side, lift on a flap."""
-        if self.scene != "eagle":
-            return
-        beat = 0.08 if self.falling else max(0.0, min(1.0, self.wing_beat))
-        # four feathers, fanned so they never collapse into one slab
-        for side in (-1, 1):
-            sx = ax + side * 7
-            sy = ay + 4
-            for k in range(4):
-                length = 18 - k * 2
-                # rest = fan down; flap rotates the fan up but keeps the spread
-                y1 = sy + (2 + k * 5) - int(beat * (10 + k))
-                x0 = sx + side * 2
-                x1 = sx + side * (4 + length)
-                steps = max(abs(x1 - x0), abs(y1 - sy), 1)
-                col = YELLOW if k == 0 else ORANGE
-                for i in range(steps + 1):
-                    xx = x0 + (x1 - x0) * i // steps
-                    yy = sy + (y1 - sy) * i // steps
-                    w = 2 if i > steps * 3 // 4 else 3
-                    fx = xx if side > 0 else xx - w + 1
-                    scr.rect(fx, yy, w, 2, col)
-                tip = x1 if side > 0 else x1 - 1
-                scr.rect(tip, y1, 2, 2, NIGHT)
 
     def _draw_buddy(self, scr: PixelScreen, x: int, foot: int, shirt, wave: int) -> None:
         """Tiny colleague on the platform. wave -1/0/+1 = left / rest / right arm."""
@@ -943,7 +928,7 @@ class Stage:
             x = (i + int(self.scroll * 3.2)) % (scr.lw + 20) - 10
             scr.rect(x, GROUND + 3, 10, 2, LIME)
             scr.rect(x + 4, GROUND + 7, 6, 1, GREEN)
-        # shadow under Steve — shrinks when airborne so the leap reads
+        # The shadow shrinks with jump height.
         sh = max(2, 14 + int(self.avatar_dy // 2))
         scr.rect(AV_X - sh, GROUND - 1, sh * 2, 3, NIGHT)
         # danger line: cactus coming from the right
@@ -973,7 +958,7 @@ class Stage:
                 scr.text(x + 8, 78, "右转", WHITE if got else SILVER, 10)
 
     def _bg_nod(self, scr: PixelScreen) -> None:
-        # office desk — props sized for bobblehead Steve
+        # Desk props share the robot's pixel scale.
         self._sky(scr, (90, 55, 40), SLATE, GRAY)
         scr.rect(0, 0, scr.lw, 22, NIGHT)
         # window
@@ -1010,14 +995,14 @@ class Stage:
             scr.sprite(140 + (i % 3) * 12, 28 + (i // 3) * 12, STAR, STAR_PAL)
 
     def _bg_piano(self, scr: PixelScreen) -> None:
-        """Room + piano case; keys/hands drawn after seated Steve."""
+        """Draw the room and piano case behind the seated player."""
         scr.rect(0, 0, scr.lw, STAGE_H, NIGHT)
         scr.rect(0, 0, scr.lw, GROUND - 36, PLUM)
         for i in range(5):
             self._draw_cloud(scr, 20 + i * 60, 8 + (i % 2) * 6, 1)
         # back wall shelf
         scr.rect(0, GROUND - 40, scr.lw, 4, SLATE)
-        # chair behind the keyboard (Steve sits on this)
+        # Chair behind the keyboard.
         cx = AV_X
         scr.rect(cx - 22, GROUND - 38, 44, 6, NIGHT)
         scr.rect(cx - 20, GROUND - 36, 40, 4, SLATE)
@@ -1027,7 +1012,7 @@ class Stage:
             scr.sprite(int(n[0]), int(n[1]), NOTE, NOTE_PAL)
 
     def draw_piano_keys(self, scr: PixelScreen) -> None:
-        """Keyboard in front of Steve's torso so he reads as sitting behind it."""
+        """Draw the keyboard across the seated player's torso."""
         x0, kw = self._key_geom(scr)
         # piano body / fallboard
         scr.rect(2, GROUND - 34, scr.lw - 4, 38, NIGHT)
@@ -1054,10 +1039,16 @@ class Stage:
         scr.text(8, 36, "亮哪个键", YELLOW, 12)
         scr.text(8, 48, "就动那根指" if self.piano_input == "fingers" else "移腕再下压", YELLOW, 12)
 
-    def piano_hand_targets(self, scr: PixelScreen) -> list[tuple[int, int, list, int]]:
+    def piano_hand_targets(self, scr: PixelScreen, motion: Motion | None = None) -> list[tuple[int, int, list, int]]:
         """Per hand: palm spot plus its five fingers parked on their own keys."""
         x0, kw = self._key_geom(scr)
         out = []
+        if self.piano_input == "wrists" and motion is not None:
+            for wrist in (motion.piano_lx, motion.piano_rx):
+                key = self._key_at(wrist)
+                x = x0 + key * kw + kw // 2
+                out.append((x, GROUND - 30, [(x, self.finger_press[key])], kw))
+            return out
         for hi in (0, 1):
             fingers = [
                 (x0 + k * kw + kw // 2, self.finger_press[k])

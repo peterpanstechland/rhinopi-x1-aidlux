@@ -1,0 +1,29 @@
+.hero-frequency {min-height:34px;padding:0 13px;border:1px solid #827f93;background:#191827de;font:650 12px var(--body);color:#f4f3f8}
+.hero-frequency:hover {background:#343144;color:var(--mint)}
+.hero-frequency .ico {width:12px;height:12px;color:var(--mint)}
+#opening-dialog {width:min(780px,calc(100% - 28px),calc((100dvh - 175px) * 1.78));max-height:96dvh;padding:0;overflow:auto;color:var(--ink);background:#191922;border:1px solid #605a72;border-radius:10px;box-shadow:0 30px 100px #05040abf}
+#opening-dialog::backdrop {background:#090911ed}
+.film-head,.film-controls {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 20px}
+.film-head small {color:var(--mint);font-size:11px;letter-spacing:.1em}
+.film-head h2 {margin:3px 0 0;font-size:clamp(18px,3vw,25px);line-height:1.2}
+.film-skip,.film-controls button {min-height:36px;border:1px solid #514d60;border-radius:5px;background:#252430;color:var(--ink);padding:0 12px;font-size:13px}
+.film-skip:hover,.film-controls button:hover {color:var(--mint);border-color:var(--mint)}
+#film-audio[aria-pressed=false] {background:#b7f5cd;border-color:#b7f5cd;color:#153024;font-weight:700}
+.film-skip span {margin-left:5px}
+.film-frame {aspect-ratio:16/9;background:#101224;overflow:hidden}
+#opening-film {display:block;width:100%;height:100%;object-fit:contain;image-rendering:pixelated}
+#film-progress {display:block;width:100%;height:3px;margin:0;accent-color:var(--mint);border:0;border-radius:0}
+#film-caption {margin:0;padding:12px 20px 0;font-size:clamp(13px,2.5vw,16px);line-height:1.5;color:#eeeaf2}
+.film-controls {justify-content:flex-start;padding-top:9px}
+#film-time {margin-left:auto;white-space:nowrap;font:11px var(--mono);font-variant-numeric:tabular-nums;color:#b6b1c0}
+@media(max-width:650px) {
+  .hero-frequency {min-height:34px;padding:0 9px;font-size:11px}
+  .film-head,.film-controls {padding-inline:13px}
+  #film-caption {padding-inline:13px}
+}
+@media(max-height:430px) and (orientation:landscape) {
+  #opening-dialog {width:min(95vw,105dvh)}
+  .film-head,.film-controls {padding:4px 10px}
+  .film-head small {display:none}
+  #film-caption {padding:3px 10px 0}
+}

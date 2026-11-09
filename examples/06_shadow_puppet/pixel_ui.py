@@ -147,9 +147,13 @@ def _font(size: int):
         return f
     from PIL import ImageFont
 
-    try:
-        f = ImageFont.truetype(FONT, size)
-    except OSError:
+    for path in (FONT, "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc", "msyh.ttc"):
+        try:
+            f = ImageFont.truetype(path, size)
+            break
+        except OSError:
+            continue
+    else:
         f = ImageFont.load_default()
     _FONT_CACHE[size] = f
     return f

@@ -188,7 +188,6 @@ def main() -> int:
         if act["scene"] == "eagle":
             stage.alt = 32.0
             stage.scroll = 48.0
-            stage.wing_beat = 0.75
             stage.avatar_dy = -3.0
         pose = pose_up if act["scene"] == "dino" else (pose_out if act["scene"] in ("wings", "eagle", "wave") else pose_down)
         puppet.have = False

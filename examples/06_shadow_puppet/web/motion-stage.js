@@ -1,4 +1,4 @@
-/* Pixel-stage renderer for a single board snapshot. The board owns the game simulation. */
+/* Render the player's mirrored landmarks and the obstacle positions used by the game. */
 (() => {
   'use strict';
   const W = 384, H = 216, CENTER = W / 2, FLOOR = 189;
@@ -91,9 +91,24 @@
     const shoulder = { x: side ? 51 : 25, y: 50 + pose.tilt * dir };
     const s = point(pose.points, 11 + side), e = point(pose.points, 13 + side);
     const w = point(pose.points, 15 + side);
+    if (s && !e && w) {
+      // Some crops show both wrists but lose an elbow. Place the hand from its
+      // observed shoulder-relative position, then bend a two-segment arm to it.
+      const span = Math.max(.045,Math.abs(pose.points[12][0]-pose.points[11][0])*pose.aspect);
+      const dx=(w.x-s.x)*pose.aspect*26/span, dy=(w.y-s.y)*26/span;
+      const distance=Math.hypot(dx,dy);
+      const ux=distance>.01 ? dx/distance : dir, uy=distance>.01 ? dy/distance : 0;
+      const length=clamp(distance,2,25);
+      const along=(13*13-12*12+length*length)/(2*length);
+      const bend=Math.sqrt(Math.max(0,13*13-along*along));
+      // For a raised hand the elbow bends away from the body; for an extended arm it hangs below it.
+      const sign=Math.abs(uy)>.05 ? Math.sign(-uy*dir) : Math.sign(ux);
+      return {shoulder, elbow:{x:shoulder.x+ux*along-sign*uy*bend,y:shoulder.y+uy*along+sign*ux*bend},
+        hand:{x:shoulder.x+ux*length,y:shoulder.y+uy*length}, tracked:true};
+    }
     const elbow = extend(shoulder, s, e, 13, [dir, .7], pose.aspect);
     const hand = extend(elbow, e, w, 12, [dir * .38, .9 - (side ? idleLift : 0)], pose.aspect);
-    return { shoulder, elbow, hand };
+    return { shoulder, elbow, hand, tracked:Boolean(w) };
   }
   function forearm(c, elbow, hand) {
     line(c, elbow, hand, 6, INK);
@@ -110,35 +125,70 @@
     line(c, shoulder, elbow, 4, '#438c8b');
     forearm(c, elbow, hand);
   }
-  function player(c, pose, at, action, time, celebrate) {
-    const size = action === 'piano' ? 1.43 : 1.5;
+  function player(c, pose, at, action, visual, time, scale, celebrate) {
+    const size = scale * (action === 'piano' ? 1.43 : 1.5);
     const bob = !pose.points.length ? round(Math.sin(time * 1.7)) : 0;
     c.save();
-    c.translate(round(at.x - 38 * size), round(at.y - 70 * size + bob));
+    c.translate(round(at.x), round(at.y+bob));
     c.scale(size, size);
+    if (action==='lean') c.rotate(clamp(number(visual.avatar_dx)/58,-1,1)*.19);
+    c.translate(-38,-70);
     const idleLift = celebrate ? 1.8 : .45;
     const arms = [limbs(pose, 0, 0), limbs(pose, 1, idleLift)];
+    if (action==='flap') {
+      for (const {shoulder,hand,tracked} of arms) {
+        const dx=hand.x-shoulder.x, dy=hand.y-shoulder.y;
+        if (!tracked || Math.abs(dx)<10) continue;
+        // Feathers follow each wing's actual slope, with their tips trailing below.
+        for (let i=0;i<3;i++) {
+          const t=.40+i*.18, x=shoulder.x+dx*t, y=shoulder.y+dy*t;
+          const sign=Math.sign(dx);
+          path(c,[[x,y],[x+sign*6,y+dy*.16],[x+sign*(3-i),y+9-i]],i===1?MINT:'#72c3b0');
+        }
+      }
+    }
     for (const limb of arms) arm(c, limb);
     const sprite = images.player;
-    const headX = round(pose.yaw * 5), headY = round(pose.nod);
-    if (sprite?.complete && sprite.naturalWidth) {
-      c.drawImage(sprite, 78, 0, 78, 78, 0, 0, 78, 78);
-      c.drawImage(sprite, 0, 0, 78, 78, headX, headY, 78, 78);
-    } else {
+    const ready=Boolean(sprite?.complete && sprite.naturalWidth);
+    if (ready) c.drawImage(sprite,78,0,78,78,0,0,78,78);
+    else {
       rect(c, 26, 44, 25, 20, INK); rect(c, 28, 46, 21, 15, MINT);
       rect(c, 23, 65, 11, 5, INK); rect(c, 40, 65, 11, 5, INK);
-      rect(c, 16 + headX, 17 + headY, 44, 32, INK);
-      rect(c, 18 + headX, 19 + headY, 40, 28, MINT);
-      rect(c, 21 + headX, 23 + headY, 32, 19, INK);
-      rect(c, 26 + headX, 28 + headY, 4, 7, MINT);
-      rect(c, 41 + headX, 28 + headY, 4, 7, MINT);
-      rect(c, 40 + headX, 10 + headY, 3, 8, MINT); rect(c, 39 + headX, 7 + headY, 6, 5, CORAL);
     }
-    // Reaching across the chest or face brings that forearm in front of the large CRT shell.
-    for (const { elbow, hand } of arms) {
-      if (pose.points.length && hand.x > 18 && hand.x < 56 && hand.y < 53) forearm(c, elbow, hand);
+    // Keep the neck in place while the CRT turns into profile or pitches down.
+    const faceVisible=Boolean(point(pose.points,0));
+    const turn=action==='turn' && faceVisible ? clamp(number(visual.head_turn,pose.yaw/.17),-1,1) : 0;
+    const dip=action==='nod' && faceVisible ? clamp(number(visual.head_dip,pose.nod/2),0,1) : 0;
+    c.save();
+    const headX=round(pose.yaw*4+turn*7);
+    c.translate(38+headX,48+(dip ? round(dip*3) : round(pose.nod)));
+    c.scale((turn>.40?-1:1)*(1-Math.abs(turn)*.30),1-dip*.27);
+    c.translate(-38,-48);
+    if (ready) c.drawImage(sprite,0,0,78,78,0,0,78,78);
+    else {
+      rect(c,16,17,44,32,INK); rect(c,18,19,40,28,MINT);
+      rect(c,21,23,32,19,INK); rect(c,26,28,4,7,MINT); rect(c,41,28,4,7,MINT);
+      rect(c,40,10,3,8,MINT); rect(c,39,7,6,5,CORAL);
     }
     c.restore();
+    for (const {elbow,hand,shoulder,tracked} of arms) {
+      // A raised forearm should remain visible when it crosses the CRT.
+      if (tracked && hand.x>15 && hand.x<62 && hand.y<53) forearm(c,elbow,hand);
+      if (action==='wave' && tracked && hand.y<shoulder.y) {
+        rect(c,hand.x-2,hand.y-6,4,2,GOLD);
+        rect(c,hand.x-5,hand.y-4,2,2,'#fbe4ac');
+      }
+    }
+    c.restore();
+  }
+  function paintAvatar(ctx,snapshot,x,feetY,scale=1) {
+    if (!ctx || !snapshot) return;
+    ensureImages();
+    const action=snapshot.phase==='round' ? snapshot.act_id : '';
+    const challenge=snapshot.challenge || {};
+    const celebrate=snapshot.phase==='summary' || (snapshot.sub==='clear' && challenge.frac>=1);
+    const time=reducedMotion?.matches ? 0 : performance.now()/1000;
+    player(ctx,poseInfo(snapshot),{x,y:feetY},action,challenge.visual || {},time,scale,celebrate);
   }
   function flag(c, x, y, height, collected) {
     const width = round(height * .7);
@@ -206,6 +256,17 @@
         wristCursor(c,left+(key+.5)*width+offset,top-2,side);
       }
     }
+    if (tracked && Array.isArray(visual.finger_depth)) {
+      // In board finger mode each physical finger owns one key. Missing fingers
+      // stay absent until the hand tracker sees them again.
+      visual.finger_depth.forEach((press,i)=>{
+        if (i>=10 || !Number.isFinite(press)) return;
+        const x=left+(i+.5)*width, y=top-9+clamp(press,0,1)*10;
+        rect(c,x-2,y-5,5,9,INK);
+        rect(c,x-1,y-4,3,6,i<5?MINT:'#cbb7fb');
+        rect(c,x-1,y+1,3,2,press>.55?GOLD:'#fae4bc');
+      });
+    }
     for (let i=0;i<8;i++) rect(c,left+i*5,top+27,3,1,i<round(progress*8)?GOLD:'#766171');
   }
   function chargeTowers(c, pos, progress, side) {
@@ -228,6 +289,14 @@
       rect(c,l+2,143,59,2,'#e2c0a8'); rect(c,l,155,63,3,'#84758c');
       for (let j=0;j<4;j++) rect(c,l+6+j*13,146,9,7,(i+j)%3===0?GOLD:'#738398');
       rect(c,l+6,163,9,3,INK); rect(c,l+49,163,9,3,INK);
+    }
+    const departed=round(clamp(progress,0,1)*10);
+    for(let i=departed;i<10;i++){
+      const px=i<5 ? 25+i*23 : 267+(i-5)*22;
+      const coat=[MINT,'#d4b7ee',CORAL,'#e2cea7'][i%4];
+      rect(c,px,155,4,4,INK);rect(c,px-1,156,5,3,'#ffd6ae');
+      rect(c,px-1,159,6,5,coat);rect(c,px+4,157,2,4,coat);
+      rect(c,px-1,164,2,2,INK);rect(c,px+2,164,2,2,INK);
     }
   }
   function cactus(c,x,y) {
@@ -296,7 +365,7 @@
     const shadowWidth=clamp(52-(FLOOR-at.y)*.4,19,52);
     rect(c,at.x-shadowWidth/2,FLOOR+1,shadowWidth,3,'#4c4759');
     rect(c,at.x-shadowWidth*.35,FLOOR+4,shadowWidth*.7,1,'#575362');
-    player(c,pose,at,action,time,summary||clear);
+    player(c,pose,at,action,visual,time,1,summary||clear);
     if(action==='piano') keyboard(c,visual,progress,pose.points,challenge.tracking!==false);
     if(action==='lean'){
       rect(c,at.x-30,at.y+4,30,2,'#d77d7a');rect(c,at.x+3,at.y+3,29,2,'#c57377');
@@ -323,5 +392,5 @@
     if (Object.values(images).some(img=>!img.complete)) loading.set(canvas,snapshot||{});
     draw(canvas,snapshot||{});
   }
-  window.MotionStage = { paint };
+  window.MotionStage = {paint,paintAvatar};
 })();

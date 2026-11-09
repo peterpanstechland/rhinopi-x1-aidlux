@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import mimetypes
+import re
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -83,6 +84,48 @@ def start_http(hub: JpegHub, status: StatusHub | None, host: str, port: int) -> 
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 pass
 
+        def media(self, file: Path, content_type: str):
+            size = file.stat().st_size
+            start, stop = 0, size - 1
+            requested = self.headers.get("Range")
+            if requested:
+                match = re.fullmatch(r"bytes=(\d*)-(\d*)", requested.strip())
+                if match and any(match.groups()):
+                    first, last = match.groups()
+                    if first:
+                        start = int(first)
+                        stop = min(int(last), stop) if last else stop
+                    else:
+                        start = max(0, size - int(last))
+                else:
+                    start = size
+                if start > stop:
+                    self.send_response(416)
+                    self.send_header("Content-Range", f"bytes */{size}")
+                    self.end_headers()
+                    return
+            self.send_response(206 if requested else 200)
+            self.send_header("Accept-Ranges", "bytes")
+            if requested:
+                self.send_header("Content-Range", f"bytes {start}-{stop}/{size}")
+            self.send_header("Content-Type", content_type)
+            remaining = stop - start + 1
+            self.send_header("Content-Length", str(remaining))
+            self.end_headers()
+            if self.command == "HEAD":
+                return
+            try:
+                with file.open("rb") as src:
+                    src.seek(start)
+                    while remaining:
+                        block = src.read(min(remaining, 65536))
+                        if not block:
+                            break
+                        self.wfile.write(block)
+                        remaining -= len(block)
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
+                pass  # The player can cancel its range request when switching scenes.
+
         def do_HEAD(self):
             self.do_GET()
 
@@ -110,6 +153,9 @@ def start_http(hub: JpegHub, status: StatusHub | None, host: str, port: int) -> 
                 file = (WEB_ROOT / relative).resolve()
                 if not file.is_relative_to(WEB_ROOT) or not file.is_file():
                     self.send_error(404)
+                    return
+                if file.suffix in (".mp3", ".mp4"):
+                    self.media(file, "audio/mpeg" if file.suffix == ".mp3" else "video/mp4")
                     return
                 body = file.read_bytes()
                 if file == WEB_ROOT / "index.html":

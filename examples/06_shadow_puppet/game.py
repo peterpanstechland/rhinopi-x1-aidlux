@@ -195,6 +195,7 @@ def main() -> int:
                 npu.snapshot(),
                 posture,
                 hands,
+                nod_dipped=gest.nod_dipped,
             )
             t_ui = (time.perf_counter() - t_ui) * 1000
             t_enc = time.perf_counter()
@@ -205,7 +206,9 @@ def main() -> int:
             snap["pose_aspect"] = round(frame.shape[1] / frame.shape[0], 4)
             snap["pose_points"] = pose_points(pose, frame.shape)
             snap["posture"] = posture
-            snap["challenge"] = stage.challenge_snapshot(include_visual=game.phase == ROUND)
+            snap["challenge"] = stage.challenge_snapshot(
+                include_visual=game.phase == ROUND, motion=motion, nod_dipped=gest.nod_dipped
+            )
             status.update(snap)
             last_canvas = canvas
             if frames % 20 == 0:

@@ -337,6 +337,8 @@ def draw_screen(
     npu: dict,
     posture: dict,
     hands=None,
+    *,
+    nod_dipped: bool = False,
 ):
     """Returns the frame to publish (may be a new canvas in split mode)."""
     h, w = img.shape[:2]
@@ -349,13 +351,12 @@ def draw_screen(
             stage.draw_bg(scr)
             ax = AV_X + int(stage.avatar_dx)
             ay = AV_SH_Y + int(stage.avatar_dy)
-            puppet.face = "happy" if stage.done else ("tired" if getattr(stage, "falling", False) else "idle")
             if stage.scene == "piano":
                 # sit behind the keyboard; shoulders just above the fallboard
                 ay = GROUND - 52
                 puppet.draw(scr, ax, ay, accent_of(game.scene), style="piano")
                 stage.draw_piano_keys(scr)
-                puppet.draw_piano_arms(scr, ax, ay, stage.piano_hand_targets(scr))
+                puppet.draw_piano_arms(scr, ax, ay, stage.piano_hand_targets(scr, motion))
             else:
                 puppet.draw(
                     scr,
@@ -363,11 +364,10 @@ def draw_screen(
                     ay,
                     accent_of(game.scene),
                     style=stage.scene,
-                    nod=motion.nod,
+                    nod=float(nod_dipped),
                     turn_dir=motion.turn_dir,
+                    lean=stage.avatar_dx / 58.0,
                 )
-                if stage.scene == "eagle":
-                    stage.draw_wings(scr, ax, ay)
             stage.draw_fg(scr)
             if game.sub == READY:
                 ready_card(scr, game.act, game.act_i, len(game.acts), game.t_state)

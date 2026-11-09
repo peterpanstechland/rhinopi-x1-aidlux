@@ -9,6 +9,8 @@
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="arcade.css">
   <link rel="stylesheet" href="play.css">
+  <link rel="stylesheet" href="opening.css">
+  <script defer src="soundtrack.js"></script>
   <script defer src="extra-games.js"></script>
   <script defer src="play.js"></script>
   <script defer src="motion-stage.js"></script>
@@ -16,6 +18,7 @@
   <script defer src="camera-input.js"></script>
   <script defer src="camera-round.js"></script>
   <script defer src="arcade.js"></script>
+  <script defer src="opening.js"></script>
 </head>
 <body>
   <a class="skip" href="#main">跳到内容</a>
@@ -31,7 +34,7 @@
         <a href="#records" data-page="records"><i data-icon="cup"></i>我的战绩</a>
       </nav>
       <div class="utilities">
-        <button class="icon-button" id="sound" aria-label="开启音效" aria-pressed="false" title="开启音效"><i data-icon="mute"></i></button>
+        <button class="icon-button" id="sound" aria-label="音乐与音效" aria-pressed="true" title="音乐与音效"><i data-icon="sound"></i></button>
         <button class="icon-button" id="help" aria-label="玩法说明" title="玩法说明"><i data-icon="help"></i></button>
       </div>
     </div>
@@ -49,7 +52,7 @@
             <a class="button glass" href="#cartridges"><i data-icon="grid"></i>选择单关</a>
           </div>
         </div>
-        <span class="hero-frequency" aria-hidden="true"><b></b> RHINO CITY · 夜间频道</span>
+        <button id="replay-opening" class="hero-frequency" type="button"><i data-icon="play"></i> 观看开场动画</button>
       </div>
       <div class="hud" aria-label="街机战绩概览">
         <div class="hud-name"><i data-icon="pulse"></i><span>玩家状态<small>PLAYER HUD</small></span></div>
@@ -107,6 +110,16 @@
     </section>
     <footer><span><img src="icon.svg" alt=""> RE:CHARGE ARCADE</span><span><b></b> <span id="foot-mode">浏览器街机</span></span></footer>
   </main>
+  <dialog id="opening-dialog" aria-labelledby="opening-title">
+    <div class="film-head"><div><small>工位回血 · 序章</small><h2 id="opening-title">凌晨的救援信号</h2></div><button type="button" id="skip-opening" class="film-skip" autofocus>跳过片头 <span aria-hidden="true">→</span></button></div>
+    <div class="film-frame"><video id="opening-film" playsinline preload="none" muted aria-label="夜班开发者和小电的像素动画"></video></div>
+    <progress id="film-progress" value="0" max="32" aria-label="片头播放进度"></progress>
+    <p id="film-caption">凌晨，工作台的灯还亮着。</p>
+    <div class="film-controls">
+      <button type="button" id="film-play">暂停</button><button type="button" id="film-audio">开启声音</button>
+      <span id="film-time" aria-hidden="true">00:00 / 00:32</span>
+    </div>
+  </dialog>
   <dialog id="help-dialog" class="help-dialog"><div class="modal-top"><span class="eyebrow">PLAYER GUIDE</span><button class="icon-button" id="close-help" aria-label="关闭说明"><i data-icon="close"></i></button></div>
     <h2>怎么玩？</h2><dl><dt>体感舞台</dt><dd>选一个动作单练，或挑战全部八关。先看示范，再打开摄像头跟做。犀牛派默认每轮抽取六个动作。</dd><dt>键盘 / 触屏</dt><dd>在挑战卡带上方切换操作方式，八款游戏都能用键盘和触屏玩。</dd><dt>带走战报</dt><dd>结束后可以保存像素战报，也可以把挑战链接发给朋友。最近的成绩保存在当前浏览器。</dd></dl><button class="button primary" id="help-done">知道了<i data-icon="arrow"></i></button>
   </dialog>

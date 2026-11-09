@@ -67,6 +67,8 @@
       this.visual.avatar_dy = 0;
       this.visual.left_fill = 0;
       this.visual.right_fill = 0;
+      this.visual.head_turn = 0;
+      this.visual.head_dip = 0;
       this.visual.aim_keys = [];
       this.visual.keys_lit = [];
     }
@@ -231,6 +233,7 @@
     }
     turn({points,center,span,tilt}) {
       const yaw=(points[0].x-center)/span-this.home.nose;
+      this.visual.head_turn=clamp(yaw/.16,-1,1);
       this.cue="双肩朝前，转脸后回到正中";
       if (Math.abs(tilt-this.home.tilt)>.18) { this.turnReady=false; return; }
       if (Math.abs(yaw)<=.065) this.turnReady=true;
@@ -247,6 +250,7 @@
     }
     nod({points,shoulderY,span}) {
       const depth=(points[0].y-shoulderY)/span-this.home.depth;
+      this.visual.head_dip=clamp(depth/.085,0,1);
       if (this.nodStage==="center" && Math.abs(depth)<.04) this.nodStage="lower";
       if (this.nodStage==="lower" && depth>=.085) this.nodStage="lift";
       if (this.nodStage==="lift" && depth<=.035) {
