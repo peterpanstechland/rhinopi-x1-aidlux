@@ -6,23 +6,26 @@
   const audio = window.DeskAudio;
   const storageKey = "desk.opening.seen.v1";
   const captions = [
-    [0, "凌晨，工作台的灯还亮着。"],
-    [2.4, "大胡子在键盘和电路板之间忙了一夜，困得趴在了桌上。"],
-    [7.4, "时间慢了下来。肩膀越缩越紧，他扶住了腰。"],
-    [11.9, "屏幕里跳出一个小家伙。小电伸出手，拉他起身。"],
-    [16.9, "跟着小电，先平举双臂，再一起扇动。"],
-    [20.1, "挥一挥手，向侧面倾身滑过旗门。"],
-    [23.3, "指尖敲下琴键，看准时机跳起来。"],
-    [26.5, "向两侧转头、回正，最后跟着节拍点头。"],
-    [29.7, "击掌！该你上场了。"]
+    [0, "「最后改一行。」"],
+    [1.78, "编译通过。"],
+    [3.3, ""],
+    [4, "还有一个 bug。"],
+    [5.15, ""],
+    [7.85, "「哎，我的回车！」"],
+    [9.65, ""],
+    [15.8, "呼……"],
+    [16.55, ""],
+    [17.86, "「我就再按一……」"],
+    [18.95, ""],
+    [22, "稍后回来。"]
   ];
   const stamp = seconds => "00:" + String(Math.floor(seconds)).padStart(2, "0");
   function updateTime() {
     const time = film.currentTime;
-    const duration = Number.isFinite(film.duration) ? film.duration : 32;
+    const duration = Number.isFinite(film.duration) ? film.duration : Number(get("film-progress").max);
     get("film-progress").max = duration;
     get("film-progress").value = time;
-    get("film-time").textContent = stamp(time) + " / " + stamp(duration);
+    get("film-time").textContent = stamp(time) + " / " + stamp(Math.ceil(duration));
     if (!film.error) {
       let caption = captions[0][1];
       for (const [at, text] of captions) { if (at > time) break; caption = text; }

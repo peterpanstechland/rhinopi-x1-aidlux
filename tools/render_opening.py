@@ -2,14 +2,16 @@
 
 Run: python tools/render_opening.py <downloaded ten-second Runway source.mp4> --soundtrack <intro.mp3>
 Requires Pillow, NumPy, OpenCV and ffmpeg. The source Runway task is
-aa849db5-701a-45b8-8c43-34a5e3e9192a. The finisher uses the game's hit and reward cues.
+aa849db5-701a-45b8-8c43-34a5e3e9192a. The release runs 22.5 seconds.
 """
 
 import argparse
 import math
 from functools import lru_cache
+import random
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 import cv2
@@ -19,7 +21,7 @@ from PIL import Image, ImageDraw
 ROOT = Path(__file__).resolve().parents[1] / "examples/06_shadow_puppet/web"
 WIDTH, HEIGHT, FPS = 384, 216, 24
 OUTPUT = (768, 432)
-INK, DARK, MINT = "#22263b", "#151829", "#aef4bd"
+INK, MINT = "#22263b", "#aef4bd"
 TEAL, SUN, CORAL = "#4d9797", "#ffe1a1", "#ff987f"
 STAGE = Image.open(ROOT / "art/stage-plates.png").convert("RGB")
 ROBOT = Image.open(ROOT / "art/stage-player.png").convert("RGBA")
@@ -40,11 +42,6 @@ def poly(d, coords, color):
     d.polygon([(round(x), round(y)) for x, y in coords], fill=color)
 
 
-def star(d, x, y, radius, color):
-    box(d, x-radius, y, radius*2+1, 1, color)
-    box(d, x, y-radius, 1, radius*2+1, color)
-
-
 def smooth(t):
     t = min(1, max(0, t))
     return t*t*(3-2*t)
@@ -59,40 +56,37 @@ def mix(a, b, f):
     return a + (b-a)*f
 
 
-def between(a, b, f):
-    return (mix(a[0],b[0],f),mix(a[1],b[1],f))
-
-
 def endpoint(sx,sy,angle,length,side):
     a=math.radians(angle); return (sx+side*math.cos(a)*length,sy+math.sin(a)*length)
-
-
-def arm_angles(act,f):
-    phase=math.sin(2*math.pi*f)
-    if act=="wings":
-        v=61*(1-smooth(f*4)); return [(v,v),(v,v)]
-    if act=="flap": return [(phase*34,phase*46),(phase*34,phase*46)]
-    if act=="wave": return [(67,64),(-39,-127+phase*35)]
-    if act=="lean": return [(42,68+phase*10),(42,68-phase*10)]
-    if act=="piano":return [(69,54+phase*14),(69,54-phase*14)]
-    if act=="hands_up":return [(58-94*max(0,phase),56-108*max(0,phase))]*2
-    if act=="finish":return [(67,72),(-45,-70)]
-    return [(63,78),(63,78)]
 
 
 def robot(act,f):
     pic=Image.new("RGBA",(104,85));d=ImageDraw.Draw(pic);ox=14;oy=3
     phase=math.sin(2*math.pi*f)
-    angles=arm_angles(act,f)
-    if act=="finish":angles=angles[::-1]
-    if act=="rescue":angles=[(20,-24),(-47,-74)]
+    angles = {
+        "rescue":[(20,-24),(-47,-74)], "run":[(48,-8),(9,-53)],
+        "lift":[(-38,-70),(-48,-75)], "point":[(70,55),(1,-15)],
+        "wave":[(55,70),(-54,-102+phase*24)], "hold":[(67,62),(-12,-40)],
+        "slip":[(-71,-100),(-45,-31)], "walk":[(47+phase*22,29),(45-phase*24,22)],
+        "five":[(-32,-64),(58,43)], "strut":[(53+phase*26,20),(20-phase*30,-33)]
+    }[act]
     for i,(upper,lower) in enumerate(angles):
         side=2*i-1; a=(ox+(24 if i==0 else 54),52); b=endpoint(*a,upper,13,side); c=endpoint(*b,lower,12,side)
         path(d,[a,b,c],INK,7);path(d,[a,b],TEAL,4);path(d,[b,c],MINT,3)
         box(d,c[0]-3,c[1]-3,7,6,INK);box(d,c[0]-2,c[1]-2,5,4,"#94dfad")
-    pic.alpha_composite(ROBOT.crop((78,0,156,78)),(ox,oy))
-    head=ROBOT.crop((0,0,78,78));dx=round(phase*5) if act=="turn" else 0
-    dy=round(max(0,phase)*5) if act=="nod" else 0
+    body=ROBOT.crop((78,0,156,78))
+    if act in ("walk","run","strut","lift"):
+        pic.alpha_composite(body.crop((0,0,78,64)),(ox,oy))
+        stride=phase if act!="lift" else 1
+        for i,(x0,x1) in enumerate(((20,39),(39,58))):
+            ankle=body.crop((x0,63,x1,74))
+            turn=(1-2*i)*stride
+            ankle=ankle.rotate(turn*19,NEAREST,center=(ankle.width//2,1))
+            pic.alpha_composite(ankle,(ox+x0+round(3*turn),oy+63-round(max(0,turn)*3)))
+    else:
+        pic.alpha_composite(body,(ox,oy))
+    head=ROBOT.crop((0,0,78,78));dx=-2 if act in ("five","hold","slip") else 1
+    dy=round(abs(phase)*2) if act in ("walk","strut","run") else 1
     pic.alpha_composite(head,(ox+dx,oy+dy)); return pic
 
 
@@ -102,89 +96,10 @@ def cactus(d,x,y):
     path(d,[(x,y-14),(x+8,y-14),(x+8,y-20)],"#68a182",3)
 
 
-def stage(act,phase):
-    moods={"wings":1,"flap":1,"wave":0,"lean":2,"piano":3,"hands_up":1,"turn":0,"nod":3,"finish":0}
-    n=moods[act]; x=n%2*WIDTH;y=n//2*HEIGHT
-    im=STAGE.crop((x,y,x+WIDTH,y+HEIGHT));d=ImageDraw.Draw(im)
-    beat=math.sin(2*math.pi*phase)
-    if act=="wave":
-        for i in range(7):
-            x=round(i*68-75*phase)-24
-            box(d,x,116,67,38,"#51485c");box(d,x+1,117,65,31,"#d2b8a8");box(d,x,139,67,4,"#b57375")
-            for j in range(4):
-                box(d,x+j*13+4,120,10,11,"#6d7884");box(d,x+j*13+5,121,8,5,SUN)
-    elif act=="lean":
-        for i in range(6):
-            x=(i*84-round(phase*74))%420-20;y=132+i%3*23
-            box(d,x,y-18,2,18,INK);poly(d,[(x+1,y-18),(x+15,y-16),(x+1,y-12)],CORAL)
-    elif act=="hands_up":
-        for i in range(4):cactus(d,int(400* (1-phase)+i*101)%423-18,181)
-    elif act in ("turn","nod"):
-        for i in range(6):
-            x=37+i*9 if i<3 else 309+(i-3)*9; y=124 if act=="turn" else 118 + (i%3)*8
-            box(d,x,y,8,6,INK);box(d,x+1,y+1,6,4,SUN if i<int(phase*7) else "#9b7b8f")
-    elif act in ("wings","flap"):
-        for side in (-1,1):
-            x=192+side*154;box(d,x,136,9,38,INK)
-            for i in range(6):box(d,x+2,166-i*5,5,3,MINT if i<phase*7 else "#718190")
-    lift=round(14*max(0,beat)) if act=="hands_up" else round(6*max(0,-beat)) if act=="flap" else 0
-    shift=round(beat*15) if act=="lean" else 0
-    left=125+shift;right=261+shift;hop=0
-    robot_pic=robot(act,phase)
-    if act=="finish":
-        contact=smooth(phase/.42)*(1-smooth((phase-.65)/.25))
-        left+=31*contact;right-=29*contact;hop=50*contact
-    for xx in (left,right):d.ellipse((xx-23,181,xx+23,185),fill="#575368")
-    if act=="finish":
-        # Bring the in-game palm precisely to the developer's leading hand.
-        goalx,goaly=human_hand(left,184-lift,act,phase)
-        palma=endpoint(*endpoint(38,52,-45,13,-1),-70,12,-1)
-        right=mix(right,goalx-(palma[0]-52)*1.37,contact)
-        robotfoot=mix(193-lift-hop,goaly-(palma[1]-85)*1.37,contact)
-    else: robotfoot=193-lift-hop
-    if act=="piano":
-        for x0,top in ((77,115),(217,152)):
-            for legx in (x0+10,x0+76):
-                path(d,[(legx,top+8),(legx+4,180)],INK,3)
-            box(d,x0-2,top,96,14,INK)
-            for i in range(10):
-                box(d,x0+i*9,top+2,8,10,SUN if i==int(phase*10)%10 else "#e7d7bc")
-                if i%5 in (0,1,3):box(d,x0+i*9+6,top+1,4,6,INK)
-    sprite(im,robot_pic,right,robotfoot,1.37)
-    foreground=Image.new("RGBA",(WIDTH,HEIGHT))
-    d=ImageDraw.Draw(foreground)
-    if act=="piano":
-        # The front lip and keys sit in front of the two waists, directly under the moving hands.
-        for x0,top in ((77,115),(217,152)):
-            box(d,x0-2,top+2,96,12,INK)
-            for i in range(10):
-                box(d,x0+i*9,top+2,8,9,SUN if i==int(phase*10)%10 else "#e7d7bc")
-                if i%5 in (0,1,3):box(d,x0+i*9+6,top+2,4,4,INK)
-    if act=="finish":
-        # Energy bridges the two raised hands as the adventure is handed back to the player.
-        for i in range(17):
-            x=26+(43*i)%339;y=28+(31*i+round(24*phase))%103
-            star(d,x,y,1+i%2,(SUN,MINT,CORAL)[i%3])
-        if .40<phase<.68:
-            star(d,goalx,goaly,5+round(2*math.sin(math.pi*phase)),SUN)
-            for i in range(8):
-                a=i*math.pi/4;r=9+round((phase-.4)*20)
-                box(d,goalx+r*math.cos(a),goaly+r*math.sin(a),2,2,MINT)
-    result=im.resize(OUTPUT,NEAREST)
-    draw_human(result,left,184-lift,act,phase)
-    fg=foreground.resize(OUTPUT,NEAREST)
-    result.paste(fg,(0,0),fg)
-    return result
-
-
-ACTS = ["wings","flap","wave","lean","piano","hands_up","turn","nod"]
-
-
 ART = Path(__file__).resolve().parent / "opening_art"
 PIVOTS = ((295,205),(398,205))
 ELBOWS = ((219,205),(459,207))
 NECK, HIP = (350,184), (349,346)
-ACTOR_SCALE = .287
 
 
 def masked(pic, rect):
@@ -217,62 +132,212 @@ def rot(pic,angle,pivot):
     return pic.rotate(angle,NEAREST,center=pivot) if abs(angle)>.2 else pic
 
 
-def actor_pose(act,f):
-    """All eight moves use the exact photographed performer, including his original face."""
-    r=rig(); phase=math.sin(math.tau*f); torso=Image.new("RGBA",r["body"].size)
-    angles=arm_angles(act,f)
-    if act=="finish":angles=[angles[0],(-5,-30)]
-    for i,(upper,lower) in enumerate(angles):
+def ease(start, stop, t):
+    return smooth((t-start)/(stop-start))
+
+
+def bump(start, peak, end, t):
+    return ease(start,peak,t)*(1-ease(peak,end,t))
+
+
+def person(kind, phase, weight, mood=None):
+    """Pose the original actor with separate hips, planted legs, rib cage and neck."""
+    r=rig(); sine=math.sin(phase); cosine=math.cos(phase)
+    if kind=="reach":
+        tilt=-13;head=7;arms=((75,45),(6,-18-38*weight))
+        thighs=(-13,16);knees=(-26,22)
+    elif kind=="wave":
+        tilt=-4+3*cosine;head=7+4*sine
+        arms=((76+8*cosine,58),(24-61*weight,-15-84*weight+21*sine*weight))
+        thighs=(3,1);knees=(3,-5+4*sine)
+    else:
+        tilt=-8*weight;head=3+7*(1-weight)
+        arms=((77-55*weight,68+66*weight),(76-8*weight,82-25*weight))
+        thighs=(3-6*weight,3+3*weight);knees=(4+8*weight,-7-4*weight)
+    torso=Image.new("RGBA",r["body"].size)
+    supporting_arm=None
+    for i,(a,b) in enumerate(arms):
         sign=1-2*i
         limb=r[i,"upper"].copy()
-        limb.alpha_composite(rot(r[i,"lower"],sign*(lower-upper),ELBOWS[i]))
-        torso.alpha_composite(rot(limb,sign*upper,PIVOTS[i]))
+        limb.alpha_composite(rot(r[i,"lower"],sign*(b-a),ELBOWS[i]))
+        posed=rot(limb,sign*a,PIVOTS[i]);torso.alpha_composite(posed)
+        if i==0 and kind=="relief":supporting_arm=posed
     torso.alpha_composite(r["shirt"])
-    head=r["head"]
-    if act=="nod":
-        nod=(1-math.cos(math.tau*f))/2
-        # Pitch reduces the visible height of both lenses and cheeks while the collar stays fixed.
-        rect=head.getbbox(); crop=head.crop(rect)
-        h=round(crop.height*(1-.20*nod)); crop=crop.resize((crop.width,h),NEAREST)
-        crop=rot(crop,-8*nod,(crop.width//2,h-9))
-        torso.alpha_composite(crop,(rect[0]+round(5*nod),rect[3]-h+round(nod*3)))
-    elif act=="turn":
-        # The front-facing likeness comes from the same performance, with a slight three-quarter
-        # perspective already present in the original. Reverse that perspective on the left beat.
-        yaw=phase; rect=head.getbbox(); crop=head.crop(rect)
-        if yaw<-.17:crop=crop.transpose(Image.Transpose.FLIP_LEFT_RIGHT)
-        w=round(crop.width*(1-.10*abs(yaw)))
-        crop=crop.resize((w,crop.height),NEAREST)
-        torso.alpha_composite(crop,(round(rect[0]+(rect[2]-rect[0]-w)/2+yaw*5),rect[1]))
-    else:
-        torso.alpha_composite(head)
-    if act=="lean":torso=rot(torso,-phase*13,HIP)
-    elif act=="flap":torso=rot(torso,phase*2,HIP)
-    result=r["legs"].copy()
-    if act=="hands_up":
-        result=Image.new("RGBA",result.size)
-        spring=max(0,phase)
-        for i in (0,1):
-            side=2*i-1; hip=((322,344),(370,344))[i];knee=((299,473),(389,473))[i]
-            leg=r[i,"thigh"].copy()
-            leg.alpha_composite(rot(r[i,"calf"],-side*27*spring,knee))
-            result.alpha_composite(rot(leg,side*13*spring,hip))
-    result.alpha_composite(torso)
-    return result
+    if supporting_arm is not None:torso.alpha_composite(supporting_arm)
+    face=expression(mood or "neutral")
+    torso.alpha_composite(rot(face,head,NECK))
+    parts=Image.new("RGBA",torso.size)
+    for i in (0,1):
+        hip=((322,344),(370,344))[i];knee=((299,473),(389,473))[i]
+        leg=r[i,"thigh"].copy()
+        leg.alpha_composite(rot(r[i,"calf"],knees[i],knee))
+        parts.alpha_composite(rot(leg,thighs[i],hip))
+    parts.alpha_composite(rot(torso,tilt,HIP),(0,-round(7*weight) if kind=="relief" else 0))
+    return parts
 
 
-def draw_human(im,cx,feet,act,f):
-    actor=actor_pose(act,f); scale=ACTOR_SCALE*2
-    x=round(cx*2-349*scale);y=round(feet*2-612*scale)
-    pic=actor.resize((round(actor.width*scale),round(actor.height*scale)),Image.Resampling.LANCZOS)
-    im.paste(pic,(x,y),pic)
+@lru_cache(maxsize=5)
+def expression(mood):
+    if mood=="neutral":return rig()["head"]
+    frame=Image.new("RGBA",rig()["head"].size)
+    face=Image.open(ART/f"developer-{mood}.png").convert("RGBA")
+    face.thumbnail((90,125),Image.Resampling.LANCZOS)
+    frame.alpha_composite(face,(349-face.width//2,188-face.height))
+    return frame
 
 
-def human_hand(cx,feet,act,f):
-    upper,lower=(-5,-30) if act=="finish" else arm_angles(act,f)[1]
-    # Contact the knuckles, just before the original extended fingertips.
-    b=endpoint(*PIVOTS[1],upper,61,1);p=endpoint(*b,lower-9,110,1)
-    return (cx+(p[0]-349)*ACTOR_SCALE,feet+(p[1]-612)*ACTOR_SCALE)
+def performer(im, x, floor, kind, phase, weight=1, size=.25, mood=None):
+    frame=person(kind,phase,weight,mood); bbox=frame.getbbox()
+    cropped=frame.crop(bbox)
+    pic=cropped.resize((round(cropped.width*size*2),round(cropped.height*size*2)),Image.Resampling.LANCZOS)
+    pos=(round(x*2+(bbox[0]-349)*size*2),round(floor*2-pic.height))
+    im.paste(pic,pos,pic)
+
+
+@lru_cache(maxsize=4)
+def drawing(name):
+    src=Image.open(ART/f"developer-{name}.png").convert("RGBA")
+    padded=Image.new("RGBA",(src.width+32,src.height+28))
+    padded.alpha_composite(src,(16,14))
+    yy,xx=np.indices((padded.height,padded.width),dtype=np.float32)
+    return np.array(padded),xx,yy,src.size
+
+
+def action_drawing(im,pose,x,floor,size,phase,strength=1):
+    """The four poses use different silhouettes. Animate foot, head and hand follow-through
+    inside each exposure, pinning the shirt and hips before projecting the drawing on its arc."""
+    rgba,xx,yy,(w,h)=drawing(pose)
+    stride=math.sin(phase)
+    down=np.clip((yy-14-h*.48)/(h*.47),0,1)
+    wings=np.clip((np.abs(xx-16-w*.54)-w*.15)/(w*.38),0,1)*(1-down)
+    side=np.tanh((xx-16-w*.48)/12)
+    flex=1 if pose=="run" else .40 if pose=="leap" else .56
+    dx=(10*down*side+3*wings*side)*stride*flex*strength
+    dy=(6*down*np.maximum(0,side*stride)+2*wings*math.cos(phase))*flex*strength
+    warped=Image.fromarray(cv2.remap(rgba,xx-dx,yy+dy,cv2.INTER_NEAREST,borderMode=cv2.BORDER_CONSTANT))
+    factor=2*size
+    pic=warped.resize((round(warped.width*factor),round(warped.height*factor)),Image.Resampling.LANCZOS)
+    origin=(round(2*x-(16+w*.53)*factor),round(2*floor-(14+h)*factor))
+    im.paste(pic,origin,pic)
+    palm={"run":(162,56),"crouch":(152,117),"leap":(169,9),"land":(165,88)}[pose]
+    return x+(palm[0]-w*.53)*size,floor+(palm[1]-h)*size
+
+
+def robot_world(im,kind,phase,x,feet,scale,angle=0,squash=1):
+    pic=robot(kind,phase).rotate(angle,NEAREST,center=(52,59))
+    pic=pic.resize((round(pic.width*2*scale/squash),round(pic.height*2*scale*squash)),NEAREST)
+    im.paste(pic,(round(2*x-pic.width/2),round(2*feet-pic.height)),pic)
+
+
+def key_sprite():
+    p=Image.new("RGBA",(32,25));d=ImageDraw.Draw(p)
+    poly(d,[(1,8),(6,2),(26,1),(31,7),(30,19),(25,23),(4,23),(1,19)],"#35232c")
+    poly(d,[(3,9),(8,4),(25,3),(28,7),(26,16),(5,17)],"#ffc16f")
+    poly(d,[(4,17),(26,16),(28,8),(28,18),(24,21),(5,21)],"#ac603b")
+    path(d,[(6,8),(10,5),(23,5)],"#ffe4aa")
+    path(d,[(22,7),(21,12),(11,12)],"#50363d",2)
+    poly(d,[(9,12),(15,8),(14,15)],"#50363d")
+    return p
+
+
+KEY=key_sprite()
+
+
+def enter_key(im,x,y,scale=1,angle=0):
+    pic=KEY.rotate(angle,NEAREST,expand=True)
+    pic=pic.resize((max(1,round(pic.width*scale*2)),max(1,round(pic.height*scale*2))),NEAREST)
+    im.paste(pic,(round(x*2-pic.width/2),round(y*2-pic.height/2)),pic)
+
+
+# A six-pixel terminal font for the three diegetic messages on the CRT.
+GLYPHS={
+    "A":("0110","1001","1001","1111","1001","1001"),
+    "B":("1110","1001","1110","1001","1001","1110"),
+    "D":("1110","1001","1001","1001","1001","1110"),
+    "G":("0111","1000","1011","1001","1001","0111"),
+    "I":("111","010","010","010","010","111"),
+    "K":("1001","1010","1100","1100","1010","1001"),
+    "L":("1000","1000","1000","1000","1000","1111"),
+    "O":("0110","1001","1001","1001","1001","0110"),
+    "R":("1110","1001","1110","1100","1010","1001"),
+    "U":("1001","1001","1001","1001","1001","0110"),
+    "1":("010","110","010","010","010","111")," ":("00",)*6}
+
+
+def terminal_text(d,cx,cy,label,col):
+    widths=[len(GLYPHS[c][0])+1 for c in label];x=round(cx-sum(widths)/2)
+    for c,w in zip(label,widths):
+        for j,line in enumerate(GLYPHS[c]):
+            for i,pixel in enumerate(line):
+                if pixel=="1":d.point((x+i,cy+j),fill=col)
+        x+=w
+
+
+def display(frames,message):
+    base=frames[148].copy();fx=Image.new("RGBA",(384,216));d=ImageDraw.Draw(fx)
+    poly(d,[(195,36),(302,35),(304,41),(304,101),(298,108),(196,108),(191,104),(191,44)],"#233e4c")
+    for y in range(40,105,4):box(d,194,y,105,1,"#284753")
+    col="#faad91" if message=="1 BUG" else "#d2edb6"
+    box(d,203,52,9,2,"#577977");box(d,203,57,22,1,"#78938a")
+    terminal_text(d,251,69,message,col)
+    if message!="BRB":box(d,246,82,9,1,col)
+    fg=fx.resize(OUTPUT,NEAREST);base.paste(fg,(0,0),fg)
+    # Reconstruct the covered right corner from the unobstructed left CRT frame. The
+    # display remains legible, and none of the performer's earlier silhouette is retained.
+    reflected=base.crop((164*2,0,219*2,138*2)).transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    base.paste(reflected,(279*2,0))
+    return base
+
+
+def desk_close(frames, cap=True, hand_x=None, hand_y=131, bot_hand=0):
+    # Cut back to precisely the same desk and slot when the reflex to press Return returns.
+    base=camera(frames[151],141,151,128)
+    cx,cy=214,150
+    fx=Image.new("RGBA",(384,216));d=ImageDraw.Draw(fx)
+    poly(d,[(cx-21,cy-5),(cx-14,cy-14),(cx+20,cy-14),(cx+23,cy+4),
+            (cx+17,cy+13),(cx-19,cy+13)],"#1d2937")
+    box(d,cx-8,cy-7,14,11,"#5d6769");box(d,cx-4,cy-5,7,5,"#b5ac97")
+    fg=fx.resize(OUTPUT,NEAREST);base.paste(fg,(0,0),fg)
+    if cap:enter_key(base,cx,cy-2,1.39)
+    if bot_hand:
+        extension=ease(0,1,bot_hand)
+        bx=mix(-49,153,extension)
+        robot_world(base,"five",.5,bx,202,.82,angle=-8*extension)
+        x=bx+61;y=147
+        fx=Image.new("RGBA",(384,216));d=ImageDraw.Draw(fx)
+        path(d,[(bx+17,177),(bx+34,171),(x-10,y+7)],INK,9)
+        path(d,[(bx+17,176),(bx+34,170),(x-10,y+6)],"#509a91",5)
+        box(d,bx+34,165,4,6,"#284c55")
+        # Open game-robot palm, distinct fingers, lit mint silicone pads.
+        poly(d,[(x-15,y+8),(x-17,y+2),(x-12,y-5),(x-7,y-4),(x-4,y-8),(x+1,y-6),
+                (x+5,y-9),(x+10,y-6),(x+13,y-6),(x+16,y-2),(x+11,y+7),(x+3,y+11),(x-7,y+12)],"#1b363f")
+        poly(d,[(x-13,y+4),(x-9,y-2),(x-6,y+1),(x-2,y-4),(x+1,y-2),(x+6,y-5),
+                (x+9,y-2),(x+12,y-3),(x+12,y),(x+6,y+6),(x-5,y+9)],"#8dd2aa")
+        path(d,[(x-3,y+4),(x+3,y+4),(x+6,y+1)],"#b5f1bc",2)
+        fg=fx.resize(OUTPUT,NEAREST);base.paste(fg,(0,0),fg)
+    if hand_x is not None:
+        # Bright arm and skin both belong to the original performer. Its fingertips lead the cut.
+        arm=rig()["right-arm"];arm=arm.crop(arm.getbbox()).transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+        arm=arm.resize((round(arm.width*1.94),round(arm.height*1.70)),Image.Resampling.LANCZOS)
+        base.paste(arm,(round(hand_x*2),round(hand_y*2-arm.height*.44)),arm)
+    return base
+
+
+def workload(t,frames):
+    if t<.55:
+        return desk_close(frames,hand_x=mix(290,211,ease(.08,.49,t)),hand_y=142+4*ease(.4,.52,t))
+    if t<.91:return camera(frames[13+round((t-.55)*40)],127,178,102)
+    if t<1.19:return camera(frames[28+round((t-.91)*50)],177,145,161)
+    if t<1.40:return camera(frames[146],72,96,128)
+    if t<1.59:return camera(frames[39],128,178,81)
+    if t<1.78:return desk_close(frames,hand_x=209,hand_y=147)
+    if t<2.25:return camera(display(frames,"BUILD OK"),250,71,166)
+    if t<2.55:return camera(frames[round(mix(49,61,(t-2.25)/.30))],224,112,311)
+    if t<4.0:
+        n=round(track([(2.55,63),(2.92,78),(3.18,91),(3.50,106),(4,106)],t))
+        return frames[n].copy()
+    if t<4.20:return camera(display(frames,"1 BUG"),247,72,157)
+    return frames[round(mix(107,122,ease(4.82,5.15,t)))].copy()
 
 
 def decode(source):
@@ -304,52 +369,9 @@ def track(seq,t):
     return seq[-1][1]
 
 
-def night(t,frames):
-    if t<1.18:
-        # The scope and CRT are untouched footage from the same night-shift set.
-        f=smooth(t/1.18)
-        return camera(frames[142+int(7*f)],mix(68,92,f),100,mix(133,194,f))
-    if t<2.4:
-        # Insert of the physical board, soldering station, keyboard and the programmer's hands.
-        f=smooth((t-1.18)/1.22)
-        return camera(frames[round(9+23*f)],mix(121,150,f),mix(163,152,f),mix(167,209,f))
-    if t<5.0:
-        f=(t-2.4)/2.6
-        return camera(frames[min(62,round(f*62))],193,111,mix(384,352,smooth(f)))
-    # At 6.8 s this shot lands on frame 106, the user's approved keyframe, at original framing.
-    index=round(track([(5,63),(5.62,78),(6.2,90),(6.78,106),(7.4,117)],t))
-    return frames[index].copy()
-
-
-def bullet(t,frames):
-    # Revisit three actual performance poses while the foreground sparks and camera orbit independently.
-    i=min(2,int(t/1.5));f=(t%1.5)/1.5;drift=smooth(f)
-    if i==0:
-        im=frames[60].copy();cx,cy,width=mix(243,253,drift),110,mix(271,252,drift)
-        anchor=(297,165)
-    elif i==1:
-        im=frames[106].copy();cx,cy,width=mix(150,166,drift),125,mix(299,318,drift)
-        anchor=(332,187)
-    else:
-        im=frames[round(mix(87,132,drift))].copy();cx,cy,width=mix(269,249,drift),154,mix(244,282,drift)
-        anchor=(335,186)
-    fx=Image.new("RGBA",(384,216));d=ImageDraw.Draw(fx);ax,ay=anchor
-    # Three low-intensity arcs orbit the lumbar point; no overlays cross the face.
-    for k in range(3):
-        radius=10+8*k; a=round(30+f*60+k*27)
-        d.arc((ax-radius,ay-radius*.63,ax+radius,ay+radius*.63),a,a+85,
-              fill=("#e4bc82","#f39777","#d17871")[k],width=1)
-    for k in range(6):
-        a=(k*.13+.25*t)*math.tau
-        x=ax+(22+3*k)*math.cos(a);y=ay+(10+2*k)*math.sin(a)
-        box(d,x,y,2,1,SUN if k%3==0 else CORAL)
-    fx=fx.resize(OUTPUT,NEAREST);im.paste(fx,(0,0),fx)
-    return camera(im,cx,cy,width)
-
-
 def portal(t,frames):
     # The blue CRT is real, but the generated character in frames 154+ is never visible.
-    n=round(track([(0,140),(.50,151),(1.65,166),(3.1,189)],t))
+    n=round(track([(0,140),(.38,151),(2.57,166),(3.28,189)],t))
     clean=frames[min(n,151)].copy()
     if n>=166:
         mask=Image.new("L",OUTPUT); d=ImageDraw.Draw(mask)
@@ -358,21 +380,27 @@ def portal(t,frames):
         d.polygon([(2*x,2*y) for x,y in roi],fill=255)
         clean.paste(frames[n],(0,0),mask)
     fx=Image.new("RGBA",(384,216));d=ImageDraw.Draw(fx)
-    glow=math.sin(math.pi*min(1,t/2.12))
-    if .10<t<1.94:
-        for k in range(3):
+    glow=math.sin(math.pi*min(1,t/.8))
+    if .10<t<.8:
+        for k in range(2):
             rx=(8+4*k)*glow
             d.ellipse((246-rx,71-rx*.65,246+rx,71+rx*.65),outline=(SUN,"#c6eac6",MINT)[k])
-    jump=smooth((t-.46)/1.5)
-    px=mix(246,185,jump);foot=mix(91,164,jump)-56*math.sin(math.pi*jump)
-    scale=mix(.08,.83,smooth((t-.16)/1.45))
-    if t>.15:sprite(fx,robot("rescue",jump),px,foot,scale)
-    if .32<t<1.85:
-        for k in range(8):
-            a=k*math.pi/4; rad=9+22*((t*.83+k/8)%1)
-            star(d,246+rad*math.cos(a),71+.63*rad*math.sin(a),1,(MINT,SUN)[k%2])
+    jump=ease(.18,.75,t);tap=bump(.86,1.02,1.15,t)+bump(1.23,1.35,1.47,t)
+    pry=bump(1.69,2.07,2.26,t);dash=ease(2.66,3.29,t)
+    px=mix(246,181,jump)-8*pry-34*dash
+    foot=mix(91,169,jump)-41*math.sin(math.pi*jump)+3*tap-8*pry
+    scale=mix(.09,.73,ease(.08,.70,t))
     fg=fx.resize(OUTPUT,NEAREST);clean.paste(fg,(0,0),fg)
-    return camera(clean,207+8*math.sin(math.pi*jump),110,mix(384,346,smooth(t/3.1)))
+    if t>.09:
+        stance="run" if dash>.04 else "lift" if t>2.07 else "point"
+        robot_world(clean,stance,t*4,px,foot,scale,angle=-6*pry+3*tap+9*dash,
+                    squash=1-.09*bump(.68,.76,.84,t)-.07*tap)
+    if t<2.07:
+        enter_key(clean,206,163-2*pry,.60,7*pry)
+    else:
+        up=ease(2.07,2.27,t)
+        enter_key(clean,mix(206,px+16,up),mix(160,foot-48,up),.60,11*up)
+    return camera(clean,210+5*jump,113,mix(384,318,ease(.62,2.45,t)))
 
 
 def rising(t,frames):
@@ -387,8 +415,8 @@ def rising(t,frames):
     bx=min(165,gx-(palma[0]-52)*s); botfoot=gy-(palma[1]-85)*s
     fx=Image.new("RGBA",(384,216)); d=ImageDraw.Draw(fx)
     sprite(fx,robot("rescue",t/1.9),bx,botfoot,s)
-    if .32<t<.72:star(d,gx,gy,2,MINT)
     fg=fx.resize(OUTPUT,NEAREST);frame.paste(fg,(0,0),fg)
+    enter_key(frame,bx+9,botfoot-21,.34,5)
     width=mix(161,203,smooth(t/1.9));cy=mix(106,74,smooth((t-.2)/1.25))
     # Give the standing actor headroom without revealing any part of the second performer
     # on camera right. Only 26 guide pixels of the empty left wall extend into the composition.
@@ -401,41 +429,254 @@ def rising(t,frames):
         (left*2,top*2,(left+width)*2,(top+width*9/16)*2),Image.Resampling.BICUBIC)
 
 
+def pain_marks(im, points, intensity):
+    if intensity<.03:return im
+    fx=Image.new("RGBA",(384,216));d=ImageDraw.Draw(fx)
+    for x,y,side in points:
+        for radius,alpha in ((13,38),(9,51)):
+            d.ellipse((x-radius,y-radius*.8,x+radius,y+radius*.8),fill=(208,60,65,round(alpha*intensity)))
+        for j in range(2):
+            xx=x+side*(3+j*5)
+            line=[(xx,y+4-j),(xx+side*4,y-2-j),(xx+side*2,y-3-j),(xx+side*7,y-10-j)]
+            path(d,line,(146,58,65,round(255*intensity)),3)
+            path(d,line,(255,173,135,round(255*intensity)),1)
+    overlay=fx.resize(OUTPUT,NEAREST);im.paste(overlay,(0,0),overlay)
+    return im
+
+
+def tense_back(im,amount):
+    # Breathing lifts the orange shoulder and tightens the waist in the actual reference frame.
+    yy,xx=np.indices((OUTPUT[1],OUTPUT[0]),dtype=np.float32)
+    pull=9*amount*np.exp(-((xx-421)/86)**2-((yy-191)/55)**2)
+    brace=3*amount*np.exp(-((xx-641)/56)**2-((yy-328)/52)**2)
+    return Image.fromarray(cv2.remap(np.asarray(im),xx+brace,yy+pull,cv2.INTER_LINEAR,
+                                    borderMode=cv2.BORDER_REFLECT_101))
+
+
+def coach_body(d,x,y):
+    poly(d,[(x,y+9),(x+8,y+2),(x+165,y+2),(x+174,y+9),(x+174,y+88),(x+170,y+95),
+            (x+4,y+95),(x,y+89)],"#383749")
+    box(d,x+3,y+11,168,76,"#cbb6a2")
+    box(d,x+6,y+6,159,4,"#eee1c5");box(d,x+5,y+12,166,5,"#8b777e")
+    for k in range(3):
+        xx=x+11+k*53;box(d,xx,y+20,46,42,"#514854");box(d,xx+2,y+22,42,38,"#768da0")
+        box(d,xx+4,y+24,36,15,"#a9b5b2");box(d,xx+4,y+56,38,3,"#a58d85")
+        if k!=1:
+            px=xx+19;py=y+39
+            poly(d,[(px-7,py+12),(px-3,py+6),(px+5,py+6),(px+11,py+14),(px+12,py+18),(px-8,py+18)],"#5a737d")
+            box(d,px-2,py-3,8,10,"#c3947e");box(d,px-3,py-4,10,4,"#5f4d56")
+            box(d,px+6,py+1,2,2,"#ddba9b")
+    box(d,x+3,y+66,168,6,"#a35c61");box(d,x+3,y+72,168,2,"#ebc184")
+    box(d,x+6,y+87,162,4,"#7e6d71")
+    for k in (24,138):
+        d.ellipse((x+k,y+87,x+k+15,y+102),fill="#252b3b");d.ellipse((x+k+4,y+91,x+k+11,y+98),fill="#777683")
+    box(d,x+59,y+22,2,39,"#c5ae98")
+
+
+def station(t):
+    im=STAGE.crop((0,0,384,216));d=ImageDraw.Draw(im)
+    for x in (9,344):
+        box(d,x,34,5,123,"#585268");box(d,x+1,34,1,119,"#a3919e")
+    box(d,0,29,384,5,"#4f4c64");box(d,0,34,384,2,"#b9a19d")
+    depart=ease(.72,3.0,t)
+    carriage=94+116*depart
+    for j in range(-3,3):coach_body(d,round(carriage+j*177),42)
+    # The robot has a seat in the departing car. Its partner stays on the platform.
+    frame=im.resize(OUTPUT,NEAREST);botx=carriage+85
+    wave=ease(.65,1.18,t)
+    throw=ease(1.86,2.15,t)
+    robot_world(frame,"slip" if t>1.88 else "wave" if wave>.1 else "hold",t*3,
+                botx,108, .55,angle=3*math.sin(t*5)+9*bump(1.84,2.05,2.42,t))
+    fx=Image.new("RGBA",(384,216));d=ImageDraw.Draw(fx)
+    box(d,carriage+60,102,48,5,"#a78c81");box(d,carriage+59,105,49,2,"#d9b7a0")
+    box(d,0,142,384,4,"#463f51");box(d,0,147,384,69,"#917e86");box(d,0,148,384,2,"#dfbf96")
+    for j in range(34):box(d,j*13-4,157,9,2,"#e5c17e")
+    for j in range(12):path(d,[(j*40,162),(j*40-22,216)],"#796b79")
+    x=mix(71,123,ease(.16,2.8,t));floor=191-2*abs(math.sin(t*7))*(1-wave)
+    d.ellipse((x-18,189,x+19,193),fill="#6b6272")
+    fg=fx.resize(OUTPUT,NEAREST);frame.paste(fg,(0,0),fg)
+    kind="wave" if t<2.34 else "run"
+    if kind=="run":action_drawing(frame,"run",x,floor,.76,t*12)
+    else:performer(frame,x,floor,kind,t*5,wave,.265)
+    # The head starts tracking first. Once the forearm comes up the shoulder can relax.
+    if t<1.07:pain_marks(frame,[(x+16,floor-104,1)],1-ease(.38,1.07,t))
+    if not throw:
+        enter_key(frame,botx+18,79+math.sin(t*9)*3,.78,9*math.sin(t*8))
+    else:
+        arc=(t-1.86)/1.14
+        x0=94+116*ease(.72,3,1.86)+103
+        enter_key(frame,mix(x0,371,arc),78-41*math.sin(arc*math.pi)-10*arc,.78,10+56*arc)
+    return frame
+
+
+@lru_cache(maxsize=1)
+def desert_plate():
+    im=Image.new("RGB",(540,216));d=ImageDraw.Draw(im)
+    for yy in range(216):
+        f=yy/216;shade=tuple(round(mix(a,b,f)) for a,b in zip((192,128,133),(255,213,147)))
+        box(d,0,yy,540,1,shade)
+    d.ellipse((319,21,354,56),fill="#ffe4a8")
+    for i,(x,y,w) in enumerate(((22,33,55),(124,55,77),(250,38,47),(430,28,66))):
+        poly(d,[(x,y+4),(x+14,y+2),(x+19,y),(x+32,y),(x+38,y+2),(x+w,y+3),(x+w-1,y+5),(x,y+5)],"#e5ac96")
+    palettes=(("#b9888a","#ac7d81"),("#c38b7a","#ab7774"),("#d6a085","#aa7a79"))
+    for layer,(color,shade) in enumerate(palettes):
+        rng=random.Random(317+layer);y=116+layer*15
+        for j in range(-1,8):
+            x=j*90+rng.randint(-15,20);h=rng.randint(29,53)-layer*4;w=rng.randint(59,96)
+            pts=[(x,y),(x+15,y-h*.33),(x+25,y-h*.45),(x+32,y-h*.96),
+                 (x+w*.59,y-h),(x+w*.64,y-h*.92),(x+w*.73,y-h*.38),(x+w,y),(x+w,y+20),(x,y+20)]
+            poly(d,pts,color);poly(d,[pts[4],pts[5],pts[6],pts[7],(x+w*.74,y),(x+w*.56,y-h*.50)],shade)
+    box(d,0,159,540,57,"#dfae88")
+    rng=random.Random(616)
+    for i in range(270):
+        x=rng.randrange(540);y=rng.randint(157,216)
+        box(d,x,y,rng.randrange(1,6),1,rng.choice(("#dda384","#c88b78","#f5c99c")))
+    return im
+
+
+def desert(t):
+    camera_move=round(67*ease(0,3.8,t))
+    im=desert_plate().crop((camera_move,0,camera_move+384,216));d=ImageDraw.Draw(im)
+    for j in range(5):
+        cactus(d,j*119+8-round(camera_move*.57),154+j%3*4)
+    # The near cactus crosses between the two take-off points, against a fixed horizon.
+    obstacle=232-72*ease(.3,3.6,t)
+    d.ellipse((obstacle-16,181,obstacle+22,185),fill="#bc8c77")
+    cactus(d,obstacle,183);cactus(d,obstacle+11,182)
+    x=73+171*ease(.02,3.68,t)
+    foot=187; air=max(0,min(1,(t-1.82)/1.14))
+    arc=math.sin(math.pi*air)
+    bob=(1-ease(1.42,1.78,t))*3*abs(math.sin(t*12))
+    floor=foot-47*arc-bob
+    d.ellipse((x-(19-6*arc),foot,x+(19-6*arc),foot+4),fill="#aa8176")
+    botx=146+199*ease(0,3.70,t); botair=max(0,min(1,(t-.78)/.94))
+    bfoot=182-38*math.sin(math.pi*botair)-4*abs(math.sin(t*9))
+    d.ellipse((botx-11,179,botx+12,182),fill="#b28377")
+    frame=im.resize(OUTPUT,NEAREST)
+    if t>=3.14:
+        # Hold the return to comfort for the audible exhale. The left hand visibly lets go
+        # of the lumbar area; the low shoulder and open chest finish the movement.
+        f=ease(3.14,3.77,t)
+        frame=desert_plate().crop((101,16,407,188)).resize(OUTPUT,NEAREST)
+        performer(frame,190,272+6*f,"relief",0,1-f,.45,"exhale" if f<.70 else "grin")
+        pain_marks(frame,[(176,148,-1)],.85*(1-f))
+        robot_world(frame,"hold",t,308,201,.84,angle=-5)
+        enter_key(frame,230+7*f,158+8*f,.81,10-8*f)
+        return frame
+    robot_world(frame,"lift" if 0<botair<1 else "run",t*8,botx,bfoot,.58,
+                angle=-12*math.sin(math.pi*botair)+3*math.sin(t*9))
+    pose="run" if t<1.52 else "crouch" if t<1.84 else "leap" if t<2.91 else "land"
+    hx_attached,hy_attached=action_drawing(frame,pose,x,floor,.70,t*12, .65 if pose=="leap" else 1)
+    if .0<t<1.47:pain_marks(frame,[(x-11,floor-61,-1)],.60)
+    if t>2.86:pain_marks(frame,[(x-10,floor-59,-1)],.65*(1-ease(2.91,3.52,t)))
+    if t<2.40:
+        hx=track([(0,275),(.9,269),(1.50,244),(2.04,245),(2.4,hx_attached)],t)
+        hy=track([(0,38),(.7,74),(1.30,104),(1.6,94),(2.0,70),(2.4,hy_attached-1)],t)
+        enter_key(frame,hx,hy,.84,mix(45,-11,ease(0,2.4,t)))
+    else:
+        enter_key(frame,hx_attached+3,hy_attached-2,.82,-11+12*ease(2.4,3.4,t))
+    return frame
+
+
+def returned(t,frames):
+    if t<.58:
+        frame=desk_close(frames,cap=False)
+        f=ease(0,.41,t);enter_key(frame,214,104+43*f,.80+.59*f,18*(1-f))
+        return frame
+    if t<1.41:return camera(display(frames,"BUILD OK"),249,72,174)
+    return camera(display(frames,"1 BUG"),249,72,174)
+
+
+def punchline(t,frames):
+    # Reuse the opening camera. The viewer knows exactly where the finger expects the key.
+    slide=ease(.58,.94,t); f=ease(.03,.73,t)
+    hover=bump(.71,1.05,1.40,t)
+    hit=ease(1.71,2.28,t);recoil=bump(2.28,2.38,2.52,t)
+    x=mix(282,224,f)-6*hit+5*recoil
+    y=112+15*f-5*hover+21*hit-8*recoil
+    frame=desk_close(frames,cap=False,bot_hand=slide,hand_x=None)
+    if slide<1:enter_key(frame,214+71*slide,148-18*math.sin(math.pi*slide),1.39,-14*slide)
+    arm=rig()["right-arm"];arm=arm.crop(arm.getbbox()).transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    arm=arm.resize((round(arm.width*1.94),round(arm.height*1.70)),Image.Resampling.LANCZOS)
+    frame.paste(arm,(round(x*2),round(y*2-arm.height*.44)),arm)
+    return frame
+
+
+def exhale(t,frames):
+    plate=camera(frames[0],90,50,178).transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    f=ease(0,.82,t)
+    performer(plate,170,361+5*f,"relief",0,.18*(1-f),.63,"grin" if t>.21 else "exhale")
+    robot_world(plate,"wave",t*.5,296,190,.83,angle=-9+4*f)
+    return plate
+
+
+def reaction(frames,mood,t):
+    plate=camera(frames[0],90,50,178).transpose(Image.Transpose.FLIP_LEFT_RIGHT)
+    if mood=="wince":
+        performer(plate,186,277,"relief",0,1,.48,"wince")
+        pain_marks(plate,[(160,73,-1),(161,130,-1)],.82+.18*math.cos(15*t))
+    else:
+        x=mix(181,190,ease(0,.42,t))
+        performer(plate,x,324,"reach",0,.5,.55,"surprise")
+        robot_world(plate,"run",t*12,306+27*ease(0,.42,t),193,.67,angle=9)
+        enter_key(plate,326+27*ease(0,.42,t),157,.70,13)
+    return plate
+
+
+def empty_bench(frames):
+    # The genuine CRT casing is symmetrical. Rebuild only its right lip from the clean left
+    # edge, then leave the camera above the old foreground performer and his chair.
+    clean=display(frames,"BRB")
+    view=camera(clean,248,79,146)
+    # The cap is left upside down on the lower bezel, clear of the terminal message.
+    d=ImageDraw.Draw(view);d.ellipse((224,406,282,414),fill="#574d57")
+    enter_key(view,126,197,.85,166)
+    return view
+
+
 def film_frame(t,runway):
-    if t<7.4:return night(t,runway)
-    if t<11.9:return bullet(t-7.4,runway)
-    if t<15:return portal(t-11.9,runway)
-    if t<16.9:return rising(t-15,runway)
-    if t<29.7:
-        offset=(t-16.9)/1.6
-        return stage(ACTS[min(7,int(offset))],offset%1)
-    return stage("finish",(t-29.7)/2.3)
+    if t<5.15:
+        if 4.20<=t<4.82:
+            if t>=4.49:return reaction(runway,"wince",t-4.49)
+            amount=bump(4.2,4.41,4.82,t)
+            frame=tense_back(runway[106],amount)
+            frame=pain_marks(frame,[(204,86,-1),(326,177,1)],.52+.48*amount)
+            return camera(frame,mix(182,165,amount),124,mix(377,321,amount))
+        return workload(t,runway)
+    if t<8.43:
+        if t>=7.95:return reaction(runway,"surprise",t-7.95)
+        return portal(t-5.15,runway)
+    if t<9.65:return rising((t-8.43)*1.9/1.22,runway)
+    if t<12.65:return station(t-9.65)
+    if t<16.45:return desert(t-12.65)
+    if t<18.30:return returned(t-16.45,runway)
+    if t<20.82:return punchline(t-18.30,runway)
+    if t<22.0:return exhale(t-20.82,runway)
+    return empty_bench(runway)
 
 
 def render(source, soundtrack, encoder):
     runway=decode(source)
     output=ROOT/"cinema"; output.mkdir(exist_ok=True)
     target=output/"opening.mp4"
-    audio = ROOT/"audio"
-    filters = (
-        "[1:a]aresample=48000,atempo=0.97,volume=0.80,apad,atrim=duration=32,"
-        "afade=t=in:d=0.16,afade=t=out:st=31.0:d=1.0[theme];"
-        "[2:a]atrim=duration=0.44,volume=0.33,afade=t=out:st=0.26:d=0.18,adelay=30680:all=1[hit];"
-        "[3:a]atrim=duration=1.04,volume=0.32,afade=t=out:st=0.57:d=0.47,adelay=30860:all=1[win];"
-        "[theme][hit][win]amix=inputs=3:duration=first:normalize=0,alimiter=limit=0.89:level=0[mix]"
-    )
+    from opening_mix import mix_opening
+    staging=tempfile.TemporaryDirectory(prefix="desk-opening-")
+    mixed=Path(staging.name)/"opening.wav"
+    mix_opening(encoder,soundtrack,mixed)
+    next_video=output/"opening-render.mp4"
     process=subprocess.Popen([encoder,"-hide_banner","-loglevel","error","-y","-f","rawvideo","-pix_fmt","rgb24",
-            "-s","768x432","-r",str(FPS),"-i","-","-i",str(soundtrack),"-i",str(audio/"hit.mp3"),
-            "-i",str(audio/"reward.mp3"),"-filter_complex",filters,"-map","0:v:0","-map","[mix]",
-            "-c:v","libx264","-crf","19","-pix_fmt","yuv420p","-c:a","aac","-b:a","160k","-ar","48000",
-            "-ac","2","-t","32","-movflags","+faststart",str(target)],stdin=subprocess.PIPE)
+            "-s","768x432","-r",str(FPS),"-i","-","-i",str(mixed),"-map","0:v:0","-map","1:a:0",
+            "-c:v","libx264","-crf","18","-pix_fmt","yuv420p","-c:a","aac","-b:a","160k","-ar","48000",
+            "-ac","2","-t","22.5","-movflags","+faststart",str(next_video)],stdin=subprocess.PIPE)
     try:
-        for n in range(32*FPS):
+        for n in range(round(22.5*FPS)):
             frame=film_frame(n/FPS,runway).resize(OUTPUT,NEAREST)
             process.stdin.write(frame.tobytes())
     finally:
         process.stdin.close()
         if process.wait(): raise RuntimeError("ffmpeg could not encode the intro")
+    next_video.replace(target)
+    staging.cleanup()
     runway[106].save(output/"opening-poster.jpg",quality=95,subsampling=0)
 
 
