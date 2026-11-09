@@ -4,11 +4,12 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#101018">
-  <meta name="description" content="工位回血街机厅。跟小电去天台展翅、在雪岭穿梭、演奏落日合成器，打完一局带走你的像素战报。">
+  <meta name="description" content="工位回血有八款上半身动作游戏。用摄像头、键盘或触屏任选一关，或跟小电连续闯八关，带走你的像素战报。">
   <title>工位回血 · RE:CHARGE ARCADE</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
   <link rel="stylesheet" href="arcade.css">
   <link rel="stylesheet" href="play.css">
+  <script defer src="extra-games.js"></script>
   <script defer src="play.js"></script>
   <script defer src="motion-stage.js"></script>
   <script defer src="action-coach.js"></script>
@@ -42,10 +43,10 @@
         <div class="hero-copy">
           <span class="hero-kicker"><span class="broadcast" aria-hidden="true"></span> ROOFTOP STATION</span>
           <h1>天台回血站<span class="title-dot">.</span></h1>
-          <p>平举双臂给天台充电，向侧面倾身去碰旗。<br>跟着示范动起来，让小电跟你一起闯关。</p>
+          <p>展翅、挥手、滑雪、跳跃……八款动作游戏，任选一关。<br>也可以跟着小电，从天台一路玩到最后一个节拍。</p>
           <div class="hero-actions">
-            <a class="button primary" href="#board"><i data-icon="scan"></i>进入体感舞台</a>
-            <a class="button glass" href="#cartridges"><i data-icon="pad"></i>键盘 / 触屏试玩</a>
+            <a class="button primary" id="hero-motion" href="#board"><i data-icon="scan"></i><span>体感八关连闯</span></a>
+            <a class="button glass" href="#cartridges"><i data-icon="grid"></i>选择单关</a>
           </div>
         </div>
         <span class="hero-frequency" aria-hidden="true"><b></b> RHINO CITY · 夜间频道</span>
@@ -54,27 +55,14 @@
         <div class="hud-name"><i data-icon="pulse"></i><span>玩家状态<small>PLAYER HUD</small></span></div>
         <div class="hud-stat"><i class="mint" data-icon="bolt"></i><span>今日场次</span><strong id="hud-runs">0</strong><small>局</small></div>
         <div class="hud-stat"><i class="lilac" data-icon="cup"></i><span>最高得分</span><strong id="hud-best">0</strong><small>PTS</small></div>
-        <div class="hud-stat"><i class="peach" data-icon="cartridge"></i><span>已玩卡带</span><strong id="hud-games">0</strong><small>/ 3</small></div>
+        <div class="hud-stat"><i class="peach" data-icon="cartridge"></i><span>已玩卡带</span><strong id="hud-games">0</strong><small id="hud-total"></small></div>
       </div>
       <section id="cartridges" aria-labelledby="cartridge-title">
         <div class="section-head">
           <div class="section-name"><span class="section-icon"><i data-icon="cartridge"></i></span><h2 id="cartridge-title">挑战卡带</h2><span class="english">CARTRIDGE SELECT</span></div>
-          <span class="deck-count"><span>键盘 / 触屏</span></span>
+          <div class="stage-views deck-mode" role="group" aria-label="卡带操作方式"><button id="mode-motion" aria-pressed="true"><i data-icon="scan"></i>摄像头体感</button><button id="mode-keys" aria-pressed="false"><i data-icon="pad"></i>键盘 / 触屏</button></div>
         </div>
-        <div class="deck">
-          <button class="cart rooftop" data-play="rooftop">
-            <span class="cart-art"><img src="art/rooftop.png" alt=""><span class="cart-code">WING BEAT</span></span>
-            <span class="cart-info"><span class="cart-text"><small><b></b>节奏挑战</small><strong>天台展翅</strong><span>找准节拍，给双翼充能。</span></span><span class="cart-arrow"><i data-icon="arrow"></i></span></span>
-          </button>
-          <button class="cart alpine" data-play="alpine">
-            <span class="cart-art"><img src="art/alpine.png" alt=""><span class="cart-code">SNOW DRIFT</span></span>
-            <span class="cart-info"><span class="cart-text"><small><b></b>反应挑战</small><strong>雪岭穿梭</strong><span>左右换道，穿过雪道上的旗门。</span></span><span class="cart-arrow"><i data-icon="arrow"></i></span></span>
-          </button>
-          <button class="cart synth" data-play="synth">
-            <span class="cart-art"><img src="art/synth.png" alt=""><span class="cart-code">SUNSET SYNTH</span></span>
-            <span class="cart-info"><span class="cart-text"><small><b></b>音感挑战</small><strong>落日合奏</strong><span>跟着亮起的琴键，奏响落日。</span></span><span class="cart-arrow"><i data-icon="arrow"></i></span></span>
-          </button>
-        </div>
+        <div class="deck" id="game-deck"></div>
       </section>
     </section>
     <section id="view-board" class="subpage" hidden aria-labelledby="board-title">
@@ -96,13 +84,13 @@
             </div>
             <div id="local-controls" hidden>
               <p id="camera-info" role="status">摄像头画面只在本机处理。面对镜头，让头、肩和双手入画。</p>
-              <button class="button primary" id="start-camera"><i data-icon="scan"></i><span>开启摄像头闯三关</span></button>
+              <button class="button primary" id="start-camera"><i data-icon="scan"></i><span id="start-label">开启摄像头闯八关</span></button>
               <button class="button glass" id="stop-camera" hidden>退出并关闭摄像头</button>
             </div>
             <div id="board-summary" hidden><button class="button primary" id="share-board"><i data-icon="cup"></i><span id="share-board-label">查看战报</span></button></div>
           </aside>
         </div>
-        <div id="guide-library" hidden><h2>动作示范</h2><div id="guide-picker" role="group" aria-label="选择示范动作"></div><p>本机摄像头依次挑战展翅、滑雪、弹琴。犀牛派提供全部八种动作。</p></div>
+        <div id="guide-library" hidden><h2>选择体感挑战</h2><div id="guide-picker" role="group" aria-label="选择八关连闯或单个动作"></div><p>选择一关可先看动作示范，再开启摄像头挑战。八关连闯从展翅开始。</p></div>
       </div>
       <details id="board-offline" class="board-details">
         <summary>连接犀牛派 X1 · 八种体感动作</summary>
@@ -120,7 +108,7 @@
     <footer><span><img src="icon.svg" alt=""> RE:CHARGE ARCADE</span><span><b></b> <span id="foot-mode">浏览器街机</span></span></footer>
   </main>
   <dialog id="help-dialog" class="help-dialog"><div class="modal-top"><span class="eyebrow">PLAYER GUIDE</span><button class="icon-button" id="close-help" aria-label="关闭说明"><i data-icon="close"></i></button></div>
-    <h2>怎么玩？</h2><dl><dt>体感舞台</dt><dd>先看动作示范，再开启摄像头。平举双臂、左右倾身、用手腕按下黄键，连续闯过三关。连接犀牛派后，可体验八种板端动作。</dd><dt>键盘 / 触屏</dt><dd>在大厅挑一张卡带，按屏幕提示试玩。</dd><dt>带走战报</dt><dd>结束后可以保存像素战报，也可以把挑战链接发给朋友。最近的成绩保存在当前浏览器。</dd></dl><button class="button primary" id="help-done">知道了<i data-icon="arrow"></i></button>
+    <h2>怎么玩？</h2><dl><dt>体感舞台</dt><dd>选一个动作单练，或挑战全部八关。先看示范，再打开摄像头跟做。犀牛派默认每轮抽取六个动作。</dd><dt>键盘 / 触屏</dt><dd>在挑战卡带上方切换操作方式，八款游戏都能用键盘和触屏玩。</dd><dt>带走战报</dt><dd>结束后可以保存像素战报，也可以把挑战链接发给朋友。最近的成绩保存在当前浏览器。</dd></dl><button class="button primary" id="help-done">知道了<i data-icon="arrow"></i></button>
   </dialog>
 </body>
 </html>

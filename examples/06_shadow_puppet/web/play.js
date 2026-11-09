@@ -2,6 +2,7 @@
 (() => {
   "use strict";
 
+  const extra = window.ExtraCartridges;
   const games = {
     rooftop: {
       title: "天台展翅", short: "ROOFTOP", mark: "01", art: "rooftop",
@@ -11,20 +12,26 @@
       pads: [["Space", "展翅"]],
     },
     alpine: {
-      title: "雪岭穿梭", short: "ALPINE", mark: "02", art: "alpine",
+      title: "雪岭穿梭", short: "ALPINE", mark: "04", art: "alpine",
       color: "#9ef3dc", target: 6, limit: 18, unit: "旗门",
       brief: "提前切到旗门所在雪道，让小电穿过六面旗。",
       hint: "用左右方向键换道，或点击下方雪道。旗门抵达小电脚下时判定。",
       pads: [["1", "左道"], ["2", "中道"], ["3", "右道"]],
     },
     synth: {
-      title: "落日合奏", short: "SUNSET SYNTH", mark: "03", art: "synth",
+      title: "落日合奏", short: "SUNSET SYNTH", mark: "05", art: "synth",
       color: "#ffb29b", target: 8, limit: 25, unit: "音符",
       brief: "跟着亮起的琴键，用八个音符完成落日旋律。",
       hint: "按亮起的 A、S、D、F，或点击对应琴键。按错仍可弹回当前音。",
       pads: [["A", "哆"], ["S", "咪"], ["D", "索"], ["F", "高哆"]],
     },
+    ...extra.games,
   };
+  const motionToCartridge = Object.freeze({wings:"rooftop",flap:"flap",wave:"wave",
+    lean:"alpine",piano:"synth",hands_up:"hands_up",turn:"turn",nod:"nod"});
+  const catalog = Object.freeze(Object.entries(motionToCartridge).map(([moveId,id]) => Object.freeze({
+    id,moveId,title:games[id].title,art:games[id].art,short:games[id].short,
+  })));
   const pitches = [261.63, 329.63, 392, 523.25];
   const lanes = ["左道", "中道", "右道"];
   const art = new Map();
@@ -55,10 +62,24 @@
     }
     return art.get(name);
   }
-  function inviteScore(id) {
+  function inviteScore(id, course) {
     const params = new URLSearchParams(window.location.search);
     const raw = params.get("beat");
-    return params.get("play") === id && /^\d{1,6}$/.test(raw || "") ? Number(raw) : null;
+    if (!/^\d{1,6}$/.test(raw || "")) return null;
+    if (id.startsWith("camera:")) {
+      return params.get("play")==="camera" && params.get("move")===id.slice(7) ? Number(raw) : null;
+    }
+    if (id==="camera" && (course!==8 || params.get("course")!=="8" || params.has("move"))) return null;
+    return params.get("play") === id ? Number(raw) : null;
+  }
+  function cameraMove(result) {
+    const id=String(result.id);
+    const move=id.startsWith("camera:") ? id.slice(7) : "";
+    return result.mode==="camera" && Object.hasOwn(motionToCartridge,move) ? move : "";
+  }
+  function resultArt(result) {
+    const move=cameraMove(result);
+    return move ? motionToCartridge[move] : result.mode==="arcade" ? games[result.id].art : "hero";
   }
   function number(value, fallback = 0) {
     return Number.isFinite(Number(value)) ? Math.max(0, Math.round(Number(value))) : fallback;
@@ -67,16 +88,22 @@
     if (!value || typeof value !== "object") return null;
     const motion = value.mode === "board" || value.mode === "camera";
     if (!motion && !Object.hasOwn(games, value.id)) return null;
+    const move = cameraMove(value);
+    const visited = motion && Array.isArray(value.playedIds)
+      ? value.playedIds.filter(id => typeof id==="string" && Object.hasOwn(motionToCartridge,id)) : [];
+    if (move) visited.push(move);
     const total = number(value.total);
     const at = typeof value.at === "string" && !Number.isFinite(Number(value.at))
       ? Date.parse(value.at) : Number(value.at);
     return {
-      id: motion ? value.mode : value.id,
+      id: move ? "camera:"+move : motion ? value.mode : value.id,
       title: motion ? String(value.title || "体感回血").slice(0, 40) : games[value.id].title,
       score: number(value.score), cleared: Math.min(number(value.cleared), total),
       total, seconds: number(value.seconds),
       at: Number.isFinite(at) && at > 0 && at <= 8640000000000000 ? at : Date.now(),
       mode: motion ? value.mode : "arcade",
+      course: value.mode==="camera" && !move && value.course===8 ? 8 : undefined,
+      playedIds: [...new Set(visited)],
       moves: motion && Array.isArray(value.moves) ? value.moves.filter(n=>typeof n==="string").slice(0,8).map(n=>n.slice(0,10)) : [],
     };
   }
@@ -85,7 +112,8 @@
     if (stats.day !== today) { stats.day = today; stats.runs = 0; }
     if (new Date(r.at).toDateString() === today) stats.runs++;
     stats.best = Math.max(stats.best, r.score);
-    if (r.mode==="arcade" && !stats.played.includes(r.id)) stats.played.push(r.id);
+    const played = r.mode==="arcade" ? [r.id] : r.playedIds.map(id=>motionToCartridge[id]);
+    for (const id of played) if (!stats.played.includes(id)) stats.played.push(id);
   }
   function readSaved(raw) {
     const value = JSON.parse(raw || "[]");
@@ -176,6 +204,7 @@
       zone: .64, lane: 1, laneDraw: 1, gate: 0, gateTime: 0, lastKey: -1,
       gateLanes: [0, 2, 1, 0, 1, 2], notes: [0, 1, 2, 1, 3, 2, 1, 0],
     };
+    if (Object.hasOwn(extra.games,id)) session.extra = extra.init();
     const pauseButton = button("dp-icon", "Ⅱ", () => {
       if (!session) return;
       if (session.phase === "paused") resume(); else pause();
@@ -219,7 +248,9 @@
       const bounds = canvas.getBoundingClientRect();
       const x = (event.clientX - bounds.left) / bounds.width;
       if (id === "synth" && (event.clientY - bounds.top) / bounds.height * H < 73) return;
-      const index = id === "alpine" ? Math.floor(x * 3) : id === "synth" ? Math.floor((x * W - 36) / 62) : 0;
+      let index = 0;
+      if (session.extra || id==="alpine") index = Math.min(controls.length-1, Math.floor(x * controls.length));
+      if (id==="synth") index = Math.floor((x * W - 36) / 62);
       if (index >= 0 && index < controls.length) input(index);
     });
     const rival = inviteScore(id);
@@ -313,6 +344,10 @@
       if (["1","2","3"].includes(keyName)) index = Number(keyName) - 1;
     }
     if (session.id === "synth") index = ["a","s","d","f"].indexOf(keyName);
+    if (session.extra) {
+      if (keyName === " " && (event.target === closeButton || event.target === refs.pauseButton)) return;
+      index=session.config.keys.indexOf(keyName);
+    }
     if (index < 0) return;
     event.preventDefault();
     if (!event.repeat) input(index);
@@ -339,7 +374,9 @@
     refs.controls.forEach((pad, i) => pad.classList.toggle("dp-pressed", i === index));
     clearTimeout(pressedTimer);
     pressedTimer = setTimeout(() => refs?.controls?.forEach(p => p.classList.remove("dp-pressed")), 145);
-    if (s.id === "rooftop" && s.cooldown <= 0) {
+    if (s.extra) {
+      extra.press(s,index,award,tone);
+    } else if (s.id === "rooftop" && s.cooldown <= 0) {
       const distance = Math.abs(s.cursor - s.zone);
       const hit = distance <= .125;
       award(hit, distance < .055 ? 120 : 80, hit ? (distance < .055 ? "完美节拍！" : "展翅成功！") : "早了一点？瞄准绿区再试");
@@ -382,6 +419,10 @@
       s.cooldown = Math.max(0, s.cooldown - dt);
       s.flash = Math.max(0, s.flash - dt * 1.8);
       s.cursor = .5 + .46 * Math.sin(s.elapsed * 2.85 - 1);
+      if (s.extra) {
+        extra.tick(s,dt,award,tone);
+        if (s.hits>=s.config.target) return finish();
+      }
       if (s.id === "alpine") {
         s.laneDraw += (s.lane - s.laneDraw) * Math.min(1, dt * 15);
         s.gateTime += dt;
@@ -406,7 +447,7 @@
     const enabled = s.phase === "playing";
     r.controls.forEach((pad, i) => {
       if (pad.disabled !== !enabled) pad.disabled = !enabled;
-      const current = s.id === "alpine" ? s.lane === i : s.id === "synth" && s.notes[s.hits] === i;
+      const current = s.extra ? extra.wanted(s)===i : s.id === "alpine" ? s.lane === i : s.id === "synth" && s.notes[s.hits] === i;
       if (current && !pad.hasAttribute("aria-current")) pad.setAttribute("aria-current", "true");
       if (!current && pad.hasAttribute("aria-current")) pad.removeAttribute("aria-current");
     });
@@ -416,7 +457,7 @@
     if (r.points.textContent !== scoreText) r.points.textContent = scoreText;
     if (r.counts.hidden !== !enabled) r.counts.hidden = !enabled;
     if (!s.flash) tell("");
-    const target = s.id === "alpine" ? "第 " + (s.gate + 1) + " 旗 · " + lanes[s.gateLanes[s.gate]]
+    const target = s.extra ? extra.objective(s) : s.id === "alpine" ? "第 " + (s.gate + 1) + " 旗 · " + lanes[s.gateLanes[s.gate]]
       : s.id === "synth" ? "下一个音 · " + s.config.pads[s.notes[s.hits]][0] : "抓住绿色节拍区";
     const label = enabled ? target : "挑战目标 · " + s.config.target + " " + s.config.unit;
     if (r.objective.textContent !== label) r.objective.textContent = label;
@@ -496,7 +537,11 @@
     ctx.fillStyle = grad;
     ctx.fillRect(0,0,W,H);
     if (image.complete && image.naturalWidth) {
-      if (id === "alpine") {
+      if (Object.hasOwn(extra.games,id)) {
+        const scale=Math.max(W/image.naturalWidth,H/image.naturalHeight);
+        const width=W/scale, height=H/scale;
+        ctx.drawImage(image,(image.naturalWidth-width)/2,(image.naturalHeight-height)/2,width,height,0,0,W,H);
+      } else if (id === "alpine") {
         ctx.drawImage(image, 0, 0, image.naturalWidth, image.naturalHeight*.26, 0, 0, W, 56);
       } else {
         ctx.drawImage(image, 0, 0, W, id === "rooftop" ? 96 : 91);
@@ -610,7 +655,8 @@
     if (!s || !ctx) return;
     ctx.save();
     ctx.imageSmoothingEnabled = false;
-    background(ctx,s.id);
+    if (s.extra && s.phase!=="brief") extra.draw(ctx,s);
+    else background(ctx,s.id);
     if (s.id === "rooftop") rooftop(ctx,s);
     if (s.id === "alpine") alpine(ctx,s);
     if (s.id === "synth") synth(ctx,s);
@@ -621,8 +667,7 @@
     const r = cleanResult(value);
     if (!r) return;
     const isMotion = r.mode !== "arcade";
-    const config = games[r.id];
-    const name = isMotion ? "hero" : config.art;
+    const name = resultArt(r);
     frame("回血战报", "RE:CHARGE ARCADE / RESULT", "★", "#bdff98");
     const body = el("div", "dp-result");
     const poster = el("div", "dp-poster");
@@ -638,7 +683,7 @@
     const actions = el("div", "dp-actions");
     const message = el("p","dp-message");
     message.setAttribute("role","status");
-    const rival = r.mode==="board" ? null : inviteScore(r.id);
+    const rival = r.mode==="board" ? null : inviteScore(r.id,r.course);
     if (rival !== null) {
       const difference = r.score - rival;
       message.textContent = difference > 0 ? "超越好友 " + difference + " 分！可以把这张战报发回去。"
@@ -701,8 +746,11 @@
       url.hash = "";
       url.search = "";
       if (r.mode!=="board") {
-        url.searchParams.set("play", r.id);
-        url.searchParams.set("beat", String(r.score));
+        url.searchParams.set("play", r.mode==="camera" ? "camera" : r.id);
+        const move=cameraMove(r);
+        if (move) url.searchParams.set("move",move);
+        if (r.course===8) url.searchParams.set("course","8");
+        if (move || r.course===8 || r.mode==="arcade") url.searchParams.set("beat", String(r.score));
       }
       const data = {title:"工位回血 · " + r.title,
         text:"我在《工位回血》的「" + r.title + "」拿到了 " + r.score + " 分，完成 " + r.cleared + " / " + r.total + "。换你来挑战！"};
@@ -788,7 +836,7 @@
     return canvas;
   }
   async function posterBlob(result) {
-    const name=result.mode==="arcade"?games[result.id].art:"hero";
+    const name=resultArt(result);
     const image=picture(name);
     try { await image.decode(); } catch { /* Generated fallback is self contained. */ }
     const encode=canvas=>new Promise((resolve,reject)=>{
@@ -800,7 +848,7 @@
   }
 
   window.DeskPlay = Object.freeze({
-    open, showResult, recordResult,
+    open, showResult, recordResult, catalog,
     getHistory: () => history.map(item => ({...item})),
     getStats: () => ({todayRuns: stats.day === new Date().toDateString() ? stats.runs : 0,
       bestScore: stats.best, playedGames: stats.played.length}),

@@ -14,7 +14,7 @@
 
 默认账号密码是 `aidlux` / `aidlux`。第一次登录后请改密码。
 
-「工位回血」可以直接用身体来玩。通过 localhost 或 HTTPS 打开街机大厅，进入「体感舞台」看八种动作示范，或开启本机摄像头，用平举、侧倾和手腕按键连续闯三关。犀牛派运行 `game.py` 后，从 8090 端口进入八动作体感游戏。离线双击 HTML 可用键盘或触屏试玩。[街机大厅](examples/06_shadow_puppet/web/index.html) · [启动方法和动作说明](examples/06_shadow_puppet/README.md)
+「工位回血」有八款动作游戏。通过 localhost 或 HTTPS 打开大厅，任选一张卡带用摄像头挑战，或进入体感舞台连闯八关。离线双击 HTML 也可用键盘或触屏玩全部八款。犀牛派运行 `game.py` 后，从 8090 端口进入板端游戏。[街机大厅](examples/06_shadow_puppet/web/index.html) · [启动方法和动作说明](examples/06_shadow_puppet/README.md)
 
 ## 建议阅读顺序
 
@@ -46,7 +46,7 @@
 | [examples/03_modelfarm](examples/03_modelfarm) | 模型广场下载与官方包 | 待写 |
 | [examples/04_mediapipe](examples/04_mediapipe) | AidLite Pose 预览（:8091） | 已在联调板验证 |
 | [examples/05_yolo](examples/05_yolo) | 模型广场 YOLO + 相机 | 待写 |
-| [examples/06_shadow_puppet](examples/06_shadow_puppet) | 工位回血：本机摄像头三关、犀牛派八动作体感（:8090） | 新版板端规则已用模拟轨迹验证，待实机体验 |
+| [examples/06_shadow_puppet](examples/06_shadow_puppet) | 工位回血：八关均支持本机摄像头、键盘或触屏；另有犀牛派体感模式（:8090） | 新版板端规则已用模拟轨迹验证，待实机体验 |
 | [examples/07_csi_camera](examples/07_csi_camera) | CSI 预览与接入 | 待写 |
 
 约定：文档里标了「本机已验证」的命令，是在联调板上跑通过的；标「待实机」的还没跑。

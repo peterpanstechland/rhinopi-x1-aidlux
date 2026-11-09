@@ -29,8 +29,11 @@
     return el;
   }
 
-  const games = ["rooftop", "alpine", "synth"];
+  const catalog = window.DeskPlay.catalog;
+  const games = catalog.map(game => game.id);
+  const moves = new Map(catalog.map(game => [game.moveId,game]));
   const boardMode = document.documentElement.dataset.device === "board";
+  let deckMotion = !boardMode && location.protocol !== "file:" && window.isSecureContext;
   let sound = false;
   try { sound = localStorage.getItem("desk.sound") === "on"; } catch {}
   window.deskSoundEnabled = () => sound;
@@ -56,9 +59,48 @@
     const r = guide.getBoundingClientRect();
     if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) guide.close();
   }});
-  document.querySelectorAll("[data-play]").forEach(el => {
-    el.addEventListener("click", () => window.DeskPlay.open(el.dataset.play));
-  });
+  const padHints = {
+    rooftop:"找准节拍，给双翼充能。", flap:"抬翼再压翼，飞过山谷。", wave:"左右交替，向月台上的旅客道别。",
+    alpine:"左右换道，穿过雪道上的旗门。", synth:"跟着亮起的琴键，奏响落日。",
+    hands_up:"看准仙人掌靠近的时机起跳。", turn:"左转、回正、右转，点亮两侧的灯。", nod:"低头再抬头，让节拍灯亮起。"
+  };
+  function renderDeck() {
+    const deck=$("game-deck");
+    deck.replaceChildren();
+    $("mode-motion").setAttribute("aria-pressed",String(deckMotion));
+    $("mode-keys").setAttribute("aria-pressed",String(!deckMotion));
+    $("hud-total").textContent="/ " + catalog.length;
+    for (const game of catalog) {
+      const move=window.ActionCoach.actions.find(action => action.id===game.moveId);
+      const card=document.createElement("button");
+      card.className="cart "+game.id;
+      card.setAttribute("aria-label", game.title+" · "+(deckMotion?"摄像头体感":"键盘 / 触屏"));
+      const art=textElement("span","","cart-art");
+      const img=new Image(); img.alt=""; img.src="art/"+game.art+".png";
+      art.append(img,textElement("span",game.short,"cart-code"));
+      const info=textElement("span","","cart-info");
+      const copy=textElement("span","","cart-text");
+      const region=textElement("small",move.region);
+      region.prepend(document.createElement("b"));
+      copy.append(region,textElement("strong",game.title),textElement("span",deckMotion?move.goal:padHints[game.id]));
+      const arrow=textElement("span","","cart-arrow");
+      arrow.innerHTML=icon("arrow");
+      info.append(copy,arrow);
+      card.append(art,info);
+      card.addEventListener("click", () => {
+        if (deckMotion) location.hash="board/"+game.moveId;
+        else window.DeskPlay.open(game.id);
+      });
+      deck.append(card);
+    }
+  }
+  $("mode-keys").addEventListener("click", () => {deckMotion=false; renderDeck();});
+  $("mode-motion").addEventListener("click", () => {deckMotion=true; renderDeck();});
+  if (boardMode) {
+    $("mode-motion").hidden=true;
+    $("hero-motion").querySelector("span").textContent="进入犀牛派体感";
+  }
+  renderDeck();
 
   function renderScores() {
     const history = window.DeskPlay.getHistory();
@@ -80,7 +122,8 @@
       row.className = "score-row";
       const cover = new Image();
       cover.alt = "";
-      cover.src = "art/" + (games.includes(record.id) ? record.id : "hero") + ".png";
+      const entry=catalog.find(game=>game.id===record.id || record.id==="camera:"+game.moveId);
+      cover.src = "art/" + (entry?.art || "hero") + ".png";
       const copy = document.createElement("span");
       const at = new Date(record.at).toLocaleString("zh-CN", {month:"numeric",day:"numeric",hour:"2-digit",minute:"2-digit"});
       const modes = {board:"犀牛派体感", camera:"摄像头体感", arcade:"键盘 / 触屏"};
@@ -106,6 +149,7 @@
   let cameraRequest = null;
   let cameraState = "idle";
   let guideId = "wings";
+  let singleMove = null;
   let guideStart = performance.now();
   let guideTimer;
   let guideKey = "";
@@ -122,15 +166,18 @@
     if (key !== guideKey) { guideKey = key; guideStart = performance.now(); }
     $("coach-canvas").hidden = preview || liveStatus?.phase === "summary";
     if (preview || !$("coach-canvas").hidden) {
-      coach.draw(preview ? canvas : $("coach-canvas"), action, (performance.now()-guideStart)/1000, liveStatus);
+      const snapshot = preview && action==="piano" ? {challenge:{visual:{piano_input:"wrist",target_key:2}}} : liveStatus;
+      coach.draw(preview ? canvas : $("coach-canvas"), action, (performance.now()-guideStart)/1000, snapshot);
       guideTimer = setTimeout(drawGuide, 100);
     }
   }
   function renderPreview() {
     const action = coach.actions.find(a => a.id === guideId);
-    $("phase").textContent = action.name;
-    $("round-label").textContent = "动作示范 · " + action.region;
-    $("live-tip").textContent = action.cue + " " + action.goal + "。";
+    $("phase").textContent = singleMove ? moves.get(singleMove).title : "八关连闯";
+    $("round-label").textContent = singleMove ? "单关挑战 · " + action.region : "体感挑战 · 8 关";
+    const cue=guideId==="piano" ? "左右移动手腕选中黄键，向下轻点再抬起。" : action.cue;
+    $("live-tip").textContent = singleMove ? cue + " " + action.goal + "。" : "从天台展翅开始，连续完成八种动作。每一关都有示范，整轮有两分钟有效动作时间。";
+    $("start-label").textContent = singleMove ? "开启摄像头玩这关" : "开启摄像头闯八关";
     $("round-metrics").hidden = true;
     $("guide-library").hidden = false;
     $("board-summary").hidden = !latestBoardResult;
@@ -139,20 +186,27 @@
     $("connection").textContent = cameraState === "loading" ? "正在启动" : "摄像头未开启";
     $("connection").classList.remove("online");
     $("show-camera").disabled = true;
-    document.querySelectorAll("#guide-picker button").forEach(b => b.setAttribute("aria-pressed", String(b.value === guideId)));
+    document.querySelectorAll("#guide-picker button").forEach(b => {
+      b.setAttribute("aria-pressed", String(b.value === (singleMove || "all")));
+      b.disabled=cameraState==="loading";
+    });
     updateStream();
     drawGuide();
   }
-  for (const action of coach.actions) {
-    const button = textElement("button", action.name);
-    button.value = action.id;
-    button.addEventListener("click", () => { guideId=action.id; renderPreview(); });
+  for (const item of [{value:"all",name:"八关连闯"}, ...catalog.map(game=>({value:game.moveId,name:game.title}))]) {
+    const button = textElement("button", item.name);
+    button.value = item.value;
+    button.addEventListener("click", () => {
+      const hash = item.value==="all" ? "#board" : "#board/"+item.value;
+      if (location.hash===hash) {liveStatus=null;renderPreview();} else location.hash=hash;
+    });
     $("guide-picker").append(button);
   }
   function endCamera(message, keepResult=false) {
     cameraRequest?.abort();
     cameraRequest = null;
     cameraState = "idle";
+    document.querySelectorAll("#guide-picker button").forEach(b => { b.disabled = false; });
     cameraView = false;
     $("start-camera").hidden = false;
     $("stop-camera").hidden = true;
@@ -165,7 +219,7 @@
   $("start-camera").addEventListener("click", async () => {
     if (cameraRequest || boardMode) return;
     const request = new AbortController();
-    const round = new window.CameraRound();
+    const round = new window.CameraRound(singleMove ? [singleMove] : undefined);
     cameraRequest = request;
     liveStatus = null;
     cameraState = "loading";
@@ -253,7 +307,7 @@
     const local=s?.source==="camera";
     const challenge = s?.challenge || {};
     $("round-metrics").hidden=false;
-    $("guide-library").hidden=true;
+    $("guide-library").hidden=!(local && s?.phase==="summary");
     $("stage-heading").textContent="玩家舞台";
     $("show-camera").disabled=!s || (local && cameraState!=="playing");
     $("connection").textContent = online ? local ? (s.phase==="summary" ? "回合结束" : "本机摄像头") : "板端已连接" : "正在重连";
@@ -290,7 +344,11 @@
       lastStoredRound = s.round_ended_at;
       const source=local?"camera":"board";
       const moves = (s.results || []).filter(act=>act.cleared).map(act=>act.name);
-      latestBoardResult = {id:source,title:local?"体感三连关":"工位体感挑战",score:s.round_score,cleared:s.cleared,total:s.round_len,seconds:Math.round(s.round_time),at:s.round_ended_at,mode:source,moves};
+      const playedIds=(s.results || []).filter(act=>act.cleared || act.seconds>0).map(act=>act.id);
+      if (local && s.act_id && !playedIds.includes(s.act_id)) playedIds.push(s.act_id);
+      const game=local && s.round_len===1 ? catalog.find(game=>game.moveId===s.act_id) : null;
+      const title=local ? game?.title || "体感八连关" : "工位体感挑战";
+      latestBoardResult = {id:game?"camera:"+game.moveId:source,title,score:s.round_score,cleared:s.cleared,total:s.round_len,seconds:Math.round(s.round_time),at:s.round_ended_at,mode:source,moves,playedIds,course:local && !game ? 8 : undefined};
       window.DeskPlay.recordResult(latestBoardResult);
     }
     $("board-summary").hidden = !latestBoardResult;
@@ -332,16 +390,27 @@
   $("board-address").addEventListener("input", () => { $("address-error").textContent = ""; });
   function route() {
     const hash = location.hash.slice(1);
-    const inviteCamera = new URLSearchParams(location.search).get("play")==="camera";
-    currentPage = ["board","records"].includes(hash) ? hash : !hash && (boardMode || inviteCamera) ? "board" : "lobby";
-    if (currentPage!=="board" && cameraRequest) endCamera("已离开体感舞台，摄像头已关闭。");
+    const params=new URLSearchParams(location.search);
+    const inviteCamera=!hash && params.get("play")==="camera";
+    const boardHash=hash==="board" || hash.startsWith("board/");
+    const previousPage=currentPage;
+    currentPage = hash==="records" ? "records" : boardHash || inviteCamera || (!hash && boardMode) ? "board" : "lobby";
+    const selected=inviteCamera ? params.get("move") : hash.split("/")[1];
+    const nextMove=!boardMode && moves.has(selected) ? selected : null;
+    const changeCourse=currentPage==="board" && singleMove!==nextMove;
+    if (cameraRequest && (currentPage!=="board" || changeCourse)) endCamera("摄像头已关闭。");
+    if (currentPage==="board" && !boardMode) {
+      if (changeCourse || previousPage!=="board") liveStatus=null;
+      singleMove=nextMove;
+      guideId=singleMove || "wings";
+    }
     for (const name of ["lobby","board","records"]) {
       $("view-" + name).hidden = name !== currentPage;
       const link = document.querySelector('[data-page="' + name + '"]');
       if (name === currentPage) link.setAttribute("aria-current","page"); else link.removeAttribute("aria-current");
     }
     if (hash === "cartridges") requestAnimationFrame(() => $("cartridges").scrollIntoView({block:"start"}));
-    else window.scrollTo({top:0,behavior:"instant"});
+    else if (!(previousPage==="board" && currentPage==="board")) window.scrollTo({top:0,behavior:"instant"});
     updateStream();
     if (currentPage==="board" && idle()) renderPreview();
     else drawGuide();
