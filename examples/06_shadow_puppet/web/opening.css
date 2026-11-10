@@ -13,17 +13,20 @@
 .film-frame {aspect-ratio:16/9;background:#101224;overflow:hidden}
 #opening-film {display:block;width:100%;height:100%;object-fit:contain;image-rendering:pixelated}
 #film-progress {display:block;width:100%;height:3px;margin:0;accent-color:var(--mint);border:0;border-radius:0}
-#film-caption {margin:0;min-height:calc(1.5em + 12px);padding:12px 20px 0;font-size:clamp(13px,2.5vw,16px);line-height:1.5;color:#eeeaf2}
+#film-story,#film-error {margin:0;padding:0 20px 12px;font-size:14px;color:#cdc9d8}
+#film-story summary {cursor:pointer;width:fit-content;padding:5px 0}
+#film-story summary:focus-visible {outline:2px solid var(--mint);outline-offset:2px}
+#film-story p {margin:4px 0;line-height:1.65}
 .film-controls {justify-content:flex-start;padding-top:9px}
 #film-time {margin-left:auto;white-space:nowrap;font:11px var(--mono);font-variant-numeric:tabular-nums;color:#b6b1c0}
 @media(max-width:650px) {
   .hero-frequency {min-height:34px;padding:0 9px;font-size:11px}
   .film-head,.film-controls {padding-inline:13px}
-  #film-caption {padding-inline:13px}
+  #film-story,#film-error {padding-inline:13px}
 }
 @media(max-height:430px) and (orientation:landscape) {
   #opening-dialog {width:min(95vw,105dvh)}
   .film-head,.film-controls {padding:4px 10px}
   .film-head small {display:none}
-  #film-caption {padding:3px 10px 0}
+  #film-story,#film-error {padding:0 10px 4px}
 }

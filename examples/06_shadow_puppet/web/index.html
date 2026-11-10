@@ -111,14 +111,15 @@
     <footer><span><img src="icon.svg" alt=""> RE:CHARGE ARCADE</span><span><b></b> <span id="foot-mode">浏览器街机</span></span></footer>
   </main>
   <dialog id="opening-dialog" aria-labelledby="opening-title">
-    <div class="film-head"><div><small>工位回血 · 序章</small><h2 id="opening-title">再按一次回车</h2></div><button type="button" id="skip-opening" class="film-skip" autofocus>跳过片头 <span aria-hidden="true">→</span></button></div>
-    <div class="film-frame"><video id="opening-film" playsinline preload="none" muted aria-label="像素短片：夜班开发者和小电争一颗回车键"></video></div>
+    <div class="film-head"><div><small>工位回血 · 序章</small><h2 id="opening-title">还差一个 bug</h2></div><button type="button" id="skip-opening" class="film-skip" autofocus>跳过片头 <span aria-hidden="true">→</span></button></div>
+    <div class="film-frame"><video id="opening-film" playsinline preload="none" muted aria-labelledby="opening-title" aria-describedby="film-story-text"></video></div>
     <progress id="film-progress" value="0" max="22.5" aria-label="片头播放进度"></progress>
-    <p id="film-caption">「最后改一行。」</p>
+    <p id="film-error" role="status" hidden>片头视频未能载入，可以看文字版或跳过片头。</p>
     <div class="film-controls">
       <button type="button" id="film-play">暂停</button><button type="button" id="film-audio">开启声音</button>
       <span id="film-time" aria-hidden="true">00:00 / 00:23</span>
     </div>
+    <details id="film-story"><summary>看文字版</summary><p id="film-story-text">开发者坐了两个小时，肩和腰都酸了，还惦记着最后一个 bug。屏幕里的小电跳上桌，叫他起来跟自己做「天台展翅」。两个人把双臂平举五秒，游戏随之过关。他放下肩膀，松开扶腰的手，笑着点了「休息一下」。那个 bug，等会儿再修。</p></details>
   </dialog>
   <dialog id="help-dialog" class="help-dialog"><div class="modal-top"><span class="eyebrow">PLAYER GUIDE</span><button class="icon-button" id="close-help" aria-label="关闭说明"><i data-icon="close"></i></button></div>
     <h2>怎么玩？</h2><dl><dt>体感舞台</dt><dd>选一个动作单练，或挑战全部八关。先看示范，再打开摄像头跟做。犀牛派默认每轮抽取六个动作。</dd><dt>键盘 / 触屏</dt><dd>在挑战卡带上方切换操作方式，八款游戏都能用键盘和触屏玩。</dd><dt>带走战报</dt><dd>结束后可以保存像素战报，也可以把挑战链接发给朋友。最近的成绩保存在当前浏览器。</dd></dl><button class="button primary" id="help-done">知道了<i data-icon="arrow"></i></button>
