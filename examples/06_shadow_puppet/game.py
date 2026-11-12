@@ -152,7 +152,7 @@ def main() -> int:
             motion = gest.update(pose, frame.shape)
             reading = watch.step(pose, frame.shape, dt, active=game.phase not in (ROUND, SUMMARY))
             live = game.phase == ROUND and game.sub == PLAY
-            stage.frame_width = frame.shape[1]
+            stage.frame_height, stage.frame_width = frame.shape[:2]
             stage.piano_input = "wrists" if hand_tracker is False else "fingers"
             stage.step(motion, hands, dt, live)
             puppet.update(pose, dt)

@@ -777,9 +777,6 @@
     const playerX=laneX(s.laneDraw,1);
     box(ctx,"#8bb8bd",playerX-13,111,27,3);
     window.MotionStage.paintAvatar(ctx,extra.snapshot(s),playerX,107,.57);
-    box(ctx,"#bd7669",playerX-16,109,15,2);
-    box(ctx,"#bd7669",playerX+1,109,15,2);
-    box(ctx,"#ffdf9d",playerX+14,107,3,2);
     if(s.flash>.1 && s.good) star(ctx,playerX+18,72,"#fff4bc",2);
   }
   function synth(ctx,s) {

@@ -11,7 +11,7 @@
     {id:'flap', name:'老鹰', cue:'把双臂伸向两侧，像扇翅膀一样同时抬起、落下。', goal:'扇动 8 次', region:'双臂'},
     {id:'wave', name:'挥手', cue:'抬一只手到肩膀上方，在脸旁左右摆动手腕。', goal:'挥手送走 10 人', region:'单手'},
     {id:'lean', name:'滑雪', cue:'面对屏幕，把头和上身偏向旗子一侧，避开树。', goal:'碰到 6 面旗', region:'头和上身'},
-    {id:'piano', name:'弹琴', cue:'双手张开对齐十个键，用黄键对应的手指向下点，再抬起。', goal:'弹中 8 个黄键', region:'手指'},
+    {id:'piano', name:'弹琴', cue:'掌心朝向镜头，两手各放一侧。只弯黄键点名的那根手指，再伸直。', goal:'跟着指法弹出 8 个音', region:'十指'},
     {id:'hands_up', name:'跳跃', cue:'仙人掌靠近时，坐着让双肩随上身快速上提一次，再放松落回。', goal:'越过 5 个仙人掌', region:'双肩和上身'},
     {id:'turn', name:'转头', cue:'保持双肩朝前，转脸看向一侧，回正后再转向另一侧。', goal:'左右各转 3 次', region:'头部'},
     {id:'nod', name:'点头', cue:'双肩保持原位，低一下头，再抬起看正前方。', goal:'完成 6 次点头', region:'头部'}
@@ -39,7 +39,7 @@
       ['向右倾', .95, pose([57,67,57,67], {lean:1})], ['回到中间', .6, neutral]
     ],
     piano:[
-      ['手指悬起', .85, neutral], ['点下黄键', .55, pose(calm, {press:1})], ['抬起手指', .65, neutral]
+      ['张开手指', .85, neutral], ['轻弯亮起的手指', .55, pose(calm, {press:1})], ['伸直松键', .65, neutral]
     ],
     hands_up:[
       ['坐稳', .95, neutral], ['双肩上提', .42, pose([72,63,72,63], {lift:1})], ['落回座位', .8, neutral]
@@ -151,10 +151,11 @@
       box(c,108,111,40,5,'#76738a');
       box(c,112,116,3,8,dim); box(c,141,116,3,8,dim);
     }
-    box(c,109+pose.lean*7,115,40,3,'#29233770');
+    const px=128+pose.lean*(id==='lean'?31:7);
+    if(id!=='flap') box(c,px-20,115,40,3,'#29233770');
     window.MotionStage.paintAvatar(c, {
       phase:'round', act_id:id, pose_points:points, pose_aspect:1, challenge:{visual}
-    },128 + pose.lean * 7,116 - pose.lift * 11,.98);
+    },px,116 - pose.lift * 11 - (id==='flap'?7:0),.98);
   }
   function prompts(c,id,f) {
     const {sample:p,index,progress} = f;
@@ -167,23 +168,24 @@
       if(index===1) for(let i=0;i<5;i++) box(c,15+i*7,18,5,3,i/5<=progress ? gold : dim);
     } else if(id==='flap') {
       for (const sign of [-1,1]) {
-        const x=128+sign*59;
-        arrow(c,x,index===2?70:88,x,index===2?90:68,coral);
+        const x=128+sign*85;
+        arrow(c,x,index===2?64:78,x,index===2?78:64,coral);
       }
     } else if(id==='wave') {
       arrow(c,170,46,index===2?156:184,46,gold);
     } else if(id==='lean') {
       const side=p.lean<0?-1:1;
-      const x=128+(f.obstacle==='tree'?-side:side)*64;
+      const x=128+(f.obstacle==='tree'?-side:side)*91;
       if (f.obstacle==='tree') {
         box(c,x-2,85,4,12,'#ac9280');
         polygon(c,[[x,62],[x+12,88],[x-12,88]],'#76c4a7');
         polygon(c,[[x,62],[x+5,74],[x-6,75]],'#d5ece4');
       } else {
-        box(c,x-1,64,2,33,'#c2c5ac');
-        polygon(c,[[x+1,65],[x+15,66],[x+11,71],[x+1,72]],coral);
+        box(c,x-1,74,2,39,'#664954');
+        polygon(c,[[x+1,75],[x+16,76],[x+12,82],[x+1,84]],coral);
+        box(c,x+2,78,8,2,'#fff0ce');
       }
-      if(Math.abs(p.lean)>.15) arrow(c,128+side*42,51,128+side*58,51,mint);
+      if(Math.abs(p.lean)>.15) arrow(c,128+side*83,56,128+side*96,56,mint);
     } else if(id==='hands_up') {
       for(const x of [77,179]) arrow(c,x,index===2?72:87,x,index===2?87:72,mint);
     } else if(id==='turn') {
@@ -195,7 +197,7 @@
       box(c,85,86,8,1,dim);box(c,163,86,8,1,dim);
     }
   }
-  function keyboard(c,f,target,wrist) {
+  function wristKeyboard(c,f,target) {
     const p=f.sample;
     const keyWidth=13, left=63, top=87;
     box(c,left-5,top-3,140,32,ink);box(c,left-3,top-2,136,2,lilac);
@@ -206,44 +208,20 @@
       box(c,dx,top+dy,keyWidth-1,21-dy,active?gold:'#e3ddd9');
       if(active) { box(c,dx+4,103,5,2,ink);box(c,dx+6,101,1,6,ink); }
     }
-    if(wrist) {
-      const tx=left+target*keyWidth+6;
-      const park=target<5?left+2.5*keyWidth:left+7.5*keyWidth;
-      const x=round(f.index===0 ? park+(tx-park)*Math.min(1,f.progress/.62) : tx);
-      const y=69+round(p.press*14);
-      if(f.index===0 && Math.abs(tx-x)>6) arrow(c,x,45,tx,45,gold);
-      else arrow(c,x+23,f.index===2?81:58,x+23,f.index===2?61:78,gold);
-      // Show the whole hand dipping with its wrist; all fingers keep the same relative height.
-      const side=target<5?-1:1;
-      segment(c,[x+11*side,29],[x, y-12],14,ink);
-      segment(c,[x+11*side,29],[x, y-12],10,'#7ad1aa');
-      box(c,x-6,y-13,13,5,mint);
-      box(c,x-8,y-8,17,13,ink);box(c,x-6,y-7,13,11,glove);
-      for(let j=0;j<4;j++) box(c,x-6+j*4,y+3,3,4,j===1?gold:glove);
-      box(c,x+7*side-2,y-8,5,7,glove);
-      return;
-    }
-    for(let side=0;side<2;side++) {
-      const base=left+side*5*keyWidth;
-      const palmY=58;
-      box(c,base+21,20,20,palmY-20,ink);box(c,base+23,21,16,palmY-20,'#7ad1aa');
-      box(c,base+22,palmY-15,18,4,'#b0f3bf');
-      polygon(c,[[base+9,palmY],[base+18,palmY-14],[base+44,palmY-14],[base+54,palmY],[base+54,palmY+7],[base+7,palmY+7]],ink);
-      polygon(c,[[base+11,palmY],[base+19,palmY-11],[base+43,palmY-11],[base+51,palmY],[base+51,palmY+4],[base+10,palmY+4]],glove);
-      for(let f=0;f<5;f++) {
-        const i=side*5+f, active=i===target, tipX=base+f*keyWidth+6;
-        const finger=side?4-f:f;
-        const lengths=[14,19,21,18,12];
-        const tipY=palmY+6+lengths[finger]+(active?round(p.press*13):0);
-        const root=[base+10+f*11,palmY+2], end=[tipX,tipY];
-        segment(c,root,end,8,ink);segment(c,root,end,5,active?mint:glove);
-        box(c,tipX-1,tipY,3,2,active?gold:'#c4ecae');
-      }
-      if (Math.floor(target/5)===side) {
-        const tipX=left+target*keyWidth+6;
-        arrow(c,tipX,23,tipX,35,gold);
-      }
-    }
+    const tx=left+target*keyWidth+6;
+    const park=target<5?left+2.5*keyWidth:left+7.5*keyWidth;
+    const x=round(f.index===0 ? park+(tx-park)*Math.min(1,f.progress/.62) : tx);
+    const y=69+round(p.press*14);
+    if(f.index===0 && Math.abs(tx-x)>6) arrow(c,x,45,tx,45,gold);
+    else arrow(c,x+23,f.index===2?81:58,x+23,f.index===2?61:78,gold);
+    // Show the whole hand dipping with its wrist; all fingers keep the same relative height.
+    const side=target<5?-1:1;
+    segment(c,[x+11*side,29],[x, y-12],14,ink);
+    segment(c,[x+11*side,29],[x, y-12],10,'#7ad1aa');
+    box(c,x-6,y-13,13,5,mint);
+    box(c,x-8,y-8,17,13,ink);box(c,x-6,y-7,13,11,glove);
+    for(let j=0;j<4;j++) box(c,x-6+j*4,y+3,3,4,j===1?gold:glove);
+    box(c,x+7*side-2,y-8,5,7,glove);
   }
   function footer(c,steps,f,wrist) {
     box(c,0,125,W,19,'#191c2b');
@@ -259,8 +237,9 @@
     const steps = demos[id];
     if (!steps || !canvas?.getContext) return;
     const c=canvas.getContext('2d'); if(!c) return;
-    if(canvas.width!==W) canvas.width=W;
-    if(canvas.height!==H) canvas.height=H;
+    if(canvas.width!==W*3) canvas.width=W*3;
+    if(canvas.height!==H*3) canvas.height=H*3;
+    c.setTransform(3,0,0,3,0,0);
     c.imageSmoothingEnabled=false;
     const seconds=Math.max(0,Number.isFinite(elapsedSeconds)?elapsedSeconds:0);
     const f=liveFrame(id,steps,frame(steps,seconds),snapshot);
@@ -269,8 +248,14 @@
     const wrist=id==='piano' && (input==='wrists' || input==='wrist');
     if(id==='piano') {
       const target=snapshot?.challenge?.visual?.target_key;
-      const demoKeys=[1,7,4,6];
-      keyboard(c,f,Number.isInteger(target)&&target>=0&&target<10?target:demoKeys[f.loops%demoKeys.length],wrist);
+      const demoKeys=[2,7,3,6,1,8,4,5];
+      const note=Number.isInteger(target)&&target>=0&&target<10?target:demoKeys[f.loops%demoKeys.length];
+      if (wrist) wristKeyboard(c,f,note);
+      else {
+        const depth=Array(10).fill(0);depth[note]=f.sample.press;
+        const hand_points=[0,1].map(side=>window.PianoStage.demoHand(side,depth));
+        window.PianoStage.draw(c,W,125,{target_key:note,hand_points,keys_lit:depth[note]>.6?[note]:[]},{demo:true,aspect:16/9});
+      }
     } else {
       c.save();
       // Show the waving arm on the same screen side as the player's raised wrist.

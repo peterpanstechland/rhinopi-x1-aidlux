@@ -6,7 +6,7 @@
     {id:"flap",name:"老鹰起飞",goal:"双臂向两侧展开，上下扇动 8 次",target:8,unit:"次"},
     {id:"wave",name:"月台挥手",goal:"抬起一只手左右挥，送走 10 人",target:10,unit:"人"},
     {id:"lean",name:"雪岭穿梭",goal:"向旗子一侧倾身，碰到 6 面旗",target:6,unit:"面"},
-    {id:"piano",name:"落日合奏",goal:"移动手腕选键，向下轻点 8 个黄键",target:8,unit:"键"},
+    {id:"piano",name:"落日合奏",goal:"跟着亮键，弯指弹出 8 个音",target:8,unit:"音"},
     {id:"hands_up",name:"仙人掌跳跃",goal:"仙人掌靠近时轻挺上身，越过 5 个障碍",target:5,unit:"个"},
     {id:"turn",name:"左右转头",goal:"双肩朝前，左右各转 3 次，每次回正",target:6,unit:"次"},
     {id:"nod",name:"节拍点头",goal:"低头再抬回正中，完成 6 次",target:6,unit:"次"},
@@ -47,13 +47,14 @@
       this.visual = {left_fill:0,right_fill:0,gates:[],target_key:keys[0],keys_lit:[],
         alt:0, obs:294, avatar_dy:0, left_got:0, right_got:0};
       this.obstaclePassed = false;
+      this.fingers = this.acts[this.index].id==="piano" ? new window.FingerPiano.Tracker() : null;
+      this.noteUntil=0;
       this.lastWaveSide = 0;
       this.resetTracking();
       this.cue = "";
     }
     resetTracking() {
       this.feedback = null;
-      this.wrists = [null,null];
       this.wingExtreme = null;
       this.wingPrevious = null;
       this.wingsRaised = false;
@@ -167,34 +168,21 @@
       }
       this.gateTime = 0;
     }
-    piano({points,center,span}, dt) {
+    piano({fingering}, dt) {
       const target = keys[this.count];
-      this.visual.target_key = target;
-      this.visual.piano_input = "wrist";
-      const aimed = [];
-      const pressed = [];
-      for (let i=0; i<2; i++) {
-        const wrist=points[15+i], shoulder=points[11+i];
-        const y=(wrist.y-shoulder.y)/span;
-        const key=clamp(Math.floor(((wrist.x-center)/span/2.6+.5)*10),0,9);
-        aimed.push(key);
-        if (!this.wrists[i]) this.wrists[i]={rest:y,armed:true};
-        const state=this.wrists[i], dip=y-state.rest;
-        if (dip < .045) state.armed=true;
-        if (state.armed && dip > .14) {
-          state.armed=false;
-          pressed.push(key);
-        }
-        if (state.armed && dip < .10) state.rest += (y-state.rest)*Math.min(1,dt*1.8);
+      const key=fingering.press;
+      this.noteUntil=Math.max(0,this.noteUntil-dt);
+      if (!this.noteUntil) this.visual.keys_lit=[];
+      if (key!==undefined) {
+        const match=key===target;
+        this.visual.keys_lit=[key];
+        this.noteUntil=.30;
+        this.notify(match?"hit":"miss",window.FingerPiano.label(key)+(match?" · 命中":" · 再试一次"));
+        this.feedback.key=key;
+        if (match) this.count++;
       }
-      this.visual.aim_keys=aimed;
-      this.visual.keys_lit=pressed;
-      this.cue=aimed.includes(target) ? "已对准黄键，手腕向下轻点再抬起" : "左右移手，把手腕指示移到黄键后再下压";
-      if (pressed.includes(target)) {
-        this.count++;
-        this.notify("hit","命中黄键 +1");
-        this.visual.target_key=keys[this.count] ?? target;
-      } else if (pressed.length) this.notify("miss","按错了，先把指示移到黄键");
+      this.visual.target_key=keys[this.count] ?? target;
+      this.cue="轻弯"+window.FingerPiano.label(this.visual.target_key)+"，再伸直";
     }
     hands_up({shoulderY,span,tilt}, dt) {
       // Launch on a seated shoulder rise; a held high pose can't launch a second jump.
@@ -278,8 +266,14 @@
       const pts = raw.map(p => p && Number.isFinite(p[0]) && Number.isFinite(p[1]) ? {x:p[0]*aspect,y:p[1]} : null);
       const act = this.acts[this.index];
       const needsFace=["lean","turn","nod"].includes(act.id);
-      const needsWrists=["wings","flap","piano"].includes(act.id);
-      const tracked = Boolean(frame.tracked !== false && pts[11] && pts[12] && pts[12].x-pts[11].x>.045
+      const needsWrists=["wings","flap"].includes(act.id);
+      let fingering;
+      if (this.fingers) {
+        const hands=window.FingerPiano.locate(frame.hand_points);
+        fingering=this.fingers.read(hands,aspect,now);
+        Object.assign(this.visual,{hand_points:hands,piano_input:"fingers",finger_depth:fingering.depths});
+      }
+      const tracked = this.fingers ? fingering.depths[this.visual.target_key]!==null : Boolean(frame.tracked !== false && pts[11] && pts[12] && pts[12].x-pts[11].x>.045
         && (!needsFace || pts[0]) && (!needsWrists || (pts[15] && pts[16]))
         && (act.id!=="wave" || pts[15] || pts[16]));
       const gap = this.lastFrame === null ? 0 : (now-this.lastFrame)/1000;
@@ -290,16 +284,23 @@
         if (this.sub === "ready") this.phaseTime=0;
       }
       if (tracked && !this.doneAt && this.sub !== "clear") {
-        const span=pts[12].x-pts[11].x, center=(pts[11].x+pts[12].x)/2;
-        const shoulderY=(pts[11].y+pts[12].y)/2, tilt=(pts[12].y-pts[11].y)/span;
+        let geometry={fingering};
+        if (!this.fingers) {
+          const span=pts[12].x-pts[11].x, center=(pts[11].x+pts[12].x)/2;
+          const shoulderY=(pts[11].y+pts[12].y)/2, tilt=(pts[12].y-pts[11].y)/span;
+          geometry={points:pts,center,span,shoulderY,tilt};
+          if (this.sub==="ready") this.home={center,shoulderY,tilt,nose:pts[0]?(pts[0].x-center)/span:0,depth:pts[0]?(pts[0].y-shoulderY)/span:0};
+        }
         if (this.sub === "ready") {
-          this.home={center,shoulderY,tilt,nose:pts[0]?(pts[0].x-center)/span:0,depth:pts[0]?(pts[0].y-shoulderY)/span:0};
           this.phaseTime+=dt;
-          if (this.phaseTime>=1.4) { this.sub="play"; this.phaseTime=0; }
+          if (this.phaseTime>=1.4) {
+            this.sub="play"; this.phaseTime=0;
+            if (this.fingers) this.cue="轻弯"+window.FingerPiano.label(this.visual.target_key)+"，再伸直";
+          }
         } else {
           this.elapsed+=dt;
           const before=this.count;
-          this[act.id]({points:pts,center,span,shoulderY,tilt},dt);
+          this[act.id](geometry,dt);
           if (act.id!=="wings" && this.count>before) this.score+=50;
           if (this.count>=act.target) {
             this.cleared++;
@@ -312,7 +313,7 @@
         }
       }
       const current=this.acts[this.index];
-      const cue = this.sub==="clear" ? "动作达成！" : !tracked ? "请让需要的部位回到画面，计时已暂停" : this.sub==="ready" ? "面对镜头回到正中，准备开始" : this.cue;
+      const cue = this.sub==="clear" ? "动作达成！" : !tracked ? (this.fingers ? "将"+window.FingerPiano.sideName(Number(this.visual.target_key>=5))+"放回画面同侧，张开手指" : "请让需要的部位回到画面，计时已暂停") : this.sub==="ready" ? (this.fingers?"掌心朝镜头，张开五指准备弹奏":"面对镜头回到正中，准备开始") : this.cue;
       return {
         source:"camera",camera_online:true,pose_points:raw,pose_aspect:aspect,
         phase:this.doneAt?"summary":"round",sub:this.sub,act:current.name,act_id:current.id,act_goal:current.goal,

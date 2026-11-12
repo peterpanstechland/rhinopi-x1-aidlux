@@ -85,7 +85,7 @@
       art.append(img,textElement("span",game.short,"cart-code"));
       const info=textElement("span","","cart-info");
       const copy=textElement("span","","cart-text");
-      const hint=textElement("small",deckMotion ? (game.moveId==="piano" ? "手腕" : move.region) : control);
+      const hint=textElement("small",deckMotion ? move.region : control);
       copy.append(hint,textElement("strong",game.title),textElement("span",deckMotion?move.goal:padHints[game.id]));
       const arrow=textElement("span","","cart-arrow");
       arrow.innerHTML=icon("arrow");
@@ -232,6 +232,12 @@
       clearSoundPlayed = false;
       if (s.sub !== "clear") audio.cue("start");
     }
+    const feedback = s.challenge?.feedback;
+    if (s.act_id==="piano" && Number.isInteger(feedback?.key) && audioFeedback!==feedback.seq) {
+      audioFeedback=feedback.seq;
+      audio.note(feedback.key,true);
+      if (feedback.kind==="miss") audio.cue("miss");
+    }
     if (s.sub === "clear") {
       // The board uses the same settlement phase for a timeout and a clear.
       const completed = s.results?.[s.act_i]?.cleared ?? (s.challenge?.frac >= 1);
@@ -241,7 +247,6 @@
       }
       return;
     }
-    const feedback = s.challenge?.feedback;
     if (s.sub !== "play" || s.challenge?.tracking === false || !feedback) return;
     if (!["hit", "miss"].includes(feedback.kind) || audioFeedback === feedback.seq) return;
     audioFeedback = feedback.seq;
@@ -257,7 +262,7 @@
     if (key !== guideKey) { guideKey = key; guideStart = performance.now(); }
     $("coach-canvas").hidden = preview || liveStatus?.phase === "summary";
     if (preview || !$("coach-canvas").hidden) {
-      const snapshot = preview && action==="piano" ? {challenge:{visual:{piano_input:"wrist",target_key:2}}} : liveStatus;
+      const snapshot = preview ? null : liveStatus;
       coach.draw(preview ? canvas : $("coach-canvas"), action, (performance.now()-guideStart)/1000, snapshot);
       guideTimer = setTimeout(drawGuide, 100);
     }
@@ -266,7 +271,7 @@
     const action = coach.actions.find(a => a.id === guideId);
     $("phase").textContent = singleMove ? moves.get(singleMove).title : "八关连闯";
     $("round-label").textContent = singleMove ? "单关挑战 · " + action.region : "体感挑战 · 8 关";
-    const cue=guideId==="piano" ? "左右移动手腕选中黄键，向下轻点再抬起。" : action.cue;
+    const cue=action.cue;
     $("live-tip").textContent = singleMove ? cue : "从天台展翅开始，连续完成八种动作。每一关都有示范，整轮有两分钟有效动作时间。";
     $("start-label").textContent = cameraFailed ? "重试摄像头" : singleMove ? "开启摄像头玩这关" : "开启摄像头闯八关";
     $("start-camera").hidden = !cameraSupported || Boolean(cameraRequest);
@@ -280,7 +285,7 @@
     $("board-summary").hidden = Boolean(cameraRequest) || !latestBoardResult;
     $("stage-heading").textContent = "动作预演";
     $("stage-source").textContent = moves.get(guideId).title;
-    stagePrompt(action.goal, "小电示范中 · 不计分", "preview");
+    stagePrompt(action.goal, (guideId==="piano"?"指法示范":"小电示范中")+" · 不计分", "preview");
     $("tracking-caption").closest(".stage-caption").classList.remove("tracking");
     $("connection").textContent = cameraState === "loading" ? "正在启动" : "摄像头未开启";
     $("connection").classList.remove("online");
@@ -349,7 +354,7 @@
     renderPreview();
     try {
       await window.DeskCamera.start({
-        video:$("local-video"), signal:request.signal,
+        video:$("local-video"), signal:request.signal,getAction:()=>round.acts[round.index].id,
         onStatus:message => { if (!request.signal.aborted) cameraInfo.textContent=message; },
         onFrame:frame => {
           if (request.signal.aborted) return;
@@ -373,6 +378,10 @@
     canvas.hidden = cameraView;
     stream.hidden = !boardMode || !cameraView;
     $("local-video").hidden = boardMode || !cameraView;
+    const handVisual=liveStatus?.challenge?.visual;
+    const handCanvas=$("hand-overlay");
+    handCanvas.hidden=boardMode || !cameraView || liveStatus?.phase!=="round" || liveStatus.act_id!=="piano" || !handVisual?.hand_points;
+    if (!handCanvas.hidden) window.PianoStage.overlay(handCanvas,$("local-video"),handVisual);
     $("show-stage").setAttribute("aria-pressed", String(!cameraView));
     $("show-camera").setAttribute("aria-pressed", String(cameraView));
     if (!cameraView) {
@@ -454,10 +463,13 @@
     $("time-label").textContent = playing ? "回合剩余" : local ? "本轮用时" : "预计提醒";
     $("remain").textContent = online ? mmss(playing ? s.round_left : local ? s.round_time : s.remain_s) : "—";
     $("posture").textContent = s?.posture?.tracked ? Math.round(s.posture.score) + " / 100" : "等待识别";
-    const tracked = Boolean(s?.pose_points?.[11] && s?.pose_points?.[12]);
+    const pianoInput = playing && s.act_id==="piano" && (challenge.piano_input || challenge.visual?.piano_input);
+    const fingerMode = pianoInput==="fingers";
+    if (pianoInput==="wrists") $("stage-heading").textContent="板端手腕替代模式";
+    const tracked = fingerMode ? challenge.tracking : Boolean(s?.pose_points?.[11] && s?.pose_points?.[12]);
     const missing = playing && s.sub !== "clear" && challenge.tracking === false;
-    const status = !s ? "正在接入追踪…" : s.phase === "summary" ? "本轮已结束" : s.camera_online === false ? "摄像头离线" : missing ? (local ? "等待入镜 · 计时暂停" : "等待入镜") : tracked ? "上半身已追踪" : "等待玩家入镜";
-    const instruction = missing ? "让" + (framing[s.act_id] || "上半身") + "进入画面" :
+    const status = !s ? "正在接入追踪…" : s.phase === "summary" ? "本轮已结束" : s.camera_online === false ? "摄像头离线" : missing ? (local ? "等待入镜 · 计时暂停" : "等待入镜") : tracked ? (fingerMode?"手部骨骼已识别":"上半身已追踪") : "等待玩家入镜";
+    const instruction = missing ? (fingerMode ? challenge.cue : "让" + (framing[s.act_id] || "上半身") + "进入画面") :
       playing ? challenge.cue || challenge.text || s.act_goal || "跟小电做动作" :
       s?.phase === "summary" ? "完成 " + s.cleared + " / " + s.round_len + " 关" : tip;
     stagePrompt(instruction, status, missing ? "waiting" : playing ? "playing" : "idle", playing ? challenge : null);
@@ -527,7 +539,7 @@
       if (changeCourse || previousPage!=="board") {
         liveStatus=null;
         cameraFailed=false;
-        cameraInfo.textContent=cameraHint;
+        cameraInfo.textContent=nextMove==="piano" ? "镜头只需拍清双手。左右手各管五键，手部画面只在本机处理。" : cameraHint;
       }
       singleMove=nextMove;
       guideId=singleMove || "wings";

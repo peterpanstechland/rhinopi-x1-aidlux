@@ -6,6 +6,8 @@
 #view-board .stage-views button {min-height:44px;border-radius:7px}
 #view-board .stage-views button[aria-pressed=true] {background:#c5ebbc;color:#20362f;border-color:transparent}
 #view-board .live-frame {border-block:2px solid #171622}
+#local-video,#hand-overlay {position:absolute;inset:0;width:100%;height:100%;object-fit:contain}
+#hand-overlay {pointer-events:none}
 .stage-prompt {padding:14px 16px 8px;color:#ffedcb}
 .stage-prompt-line {display:flex;align-items:baseline;justify-content:space-between;gap:12px}
 #stage-now {font-size:clamp(15px,1.6vw,21px);line-height:1.45}

@@ -72,9 +72,9 @@
     sound.currentTime = 0;
     sound.play().catch(() => {});
   }
-  function note(index) {
+  function note(index, tenKeys=false) {
     if (!enabled || !unlocked || document.hidden) return;
-    const frequency = [261.63, 329.63, 392, 523.25][index];
+    const frequency = (tenKeys ? [261.63,293.66,329.63,349.23,392,440,493.88,523.25,587.33,659.25] : [261.63,329.63,392,523.25])[index];
     const Context = window.AudioContext || window.webkitAudioContext;
     if (!frequency || !Context) return;
     audioContext ||= new Context();

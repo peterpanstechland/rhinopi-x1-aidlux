@@ -2,11 +2,25 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 global.window = {};
+require("./web/finger-piano.js");
 require("./web/camera-round.js");
 const {CameraRound} = window;
 
 // Joint offsets are measured in shoulder widths relative to the shoulder midpoint.
-function frame({head=[0,-.7],left=[-.65,.8],right=[.65,.8],dx=0,dy=0,tilt=0}={}) {
+function handsFrame(pressed) {
+  return [0,1].map(side=>{
+    const wrist=[side?.73:.27,.7], points=[wrist];
+    for(let f=0;f<5;f++) {
+      const key=side?5+f:4-f, x=wrist[0]+(side?-1:1)*(.062-f*.027);
+      for(let j=0;j<4;j++) {
+        const flex=(key===pressed ? j/3 : 0);
+        points.push([x+(f===0?j*(side?-.013:.013)*(1-flex):0),.55-j*.047+flex*.12]);
+      }
+    }
+    return points;
+  });
+}
+function frame({head=[0,-.7],left=[-.65,.8],right=[.65,.8],dx=0,dy=0,tilt=0,hands=handsFrame()}={}) {
   const aspect = 16/9;
   const span = .26;
   const points = Array(25).fill(null);
@@ -15,7 +29,7 @@ function frame({head=[0,-.7],left=[-.65,.8],right=[.65,.8],dx=0,dy=0,tilt=0}={})
   }
   put(0,head); put(11,[-.5,-tilt/2]); put(12,[.5,tilt/2]);
   put(15,left); put(16,right);
-  return {pose_points:points,pose_aspect:aspect,tracked:true};
+  return {pose_points:points,pose_aspect:aspect,tracked:true,hand_points:hands};
 }
 function player(ids) {
   const round = new CameraRound(ids);
@@ -59,8 +73,7 @@ function playAction(p) {
         break;
       }
       case "piano": {
-        const aim=((v.target_key+.5)/10-.5)*2.6;
-        pose=aim<0?{left:[aim,i%3===2?.99:.77]}:{right:[aim,i%3===2?.99:.77]};
+        pose={hands:handsFrame(i%3===2?v.target_key:undefined),head:null,left:null,right:null};
         break;
       }
       case "hands_up": pose={head:null,left:null,right:null,dy:v.obs<198 && v.obs>173 ? -.16 : 0}; break;
@@ -92,6 +105,44 @@ test("each serialised action is playable on its own, and a relay carries its ful
   assert.equal(relay.status.phase,"summary");
   assert.equal(relay.status.round_len,8);
   assert.equal(relay.status.round_score,3250);
+});
+
+test("piano uses individual fingertip joints, ignores hand translation and rearms after release",()=>{
+  const round=new CameraRound(["piano"]);
+  let t=0;
+  const tick=hands=>round.update({pose_points:[],pose_aspect:16/9,hand_points:hands},t+=100);
+  let state;for(let i=0;i<17;i++)state=tick(handsFrame());
+  assert.equal(state.sub,"play");
+  const shifted=handsFrame().map(hand=>hand.map(([x,y])=>[x+.04,y-.14]));
+  assert.equal(tick(shifted).challenge.count,0);
+  const key=state.challenge.visual.target_key;
+  state=tick(handsFrame(key+1));
+  assert.equal(state.challenge.feedback.kind,"miss");
+  assert.equal(state.challenge.count,0);
+  tick(handsFrame());
+  state=tick(handsFrame(key));
+  assert.equal(state.challenge.feedback.key,key);
+  assert.equal(state.challenge.count,1);
+  const seq=state.challenge.feedback.seq;
+  assert.equal(tick(handsFrame(key)).challenge.feedback.seq,seq);
+  const elapsed=round.elapsed;
+  for(let i=0;i<20;i++)state=tick([handsFrame()[0]]);
+  assert.equal(state.challenge.tracking,false);
+  assert.equal(state.round_time,elapsed);
+  state=tick(handsFrame(state.challenge.visual.target_key));
+  assert.equal(state.challenge.count,1);
+});
+
+test("each of the ten anatomical fingers keeps its own note",()=>{
+  for(let key=0;key<10;key++) {
+    const tracker=new window.FingerPiano.Tracker();
+    const read=(hands,t)=>tracker.read(window.FingerPiano.locate(hands),16/9,t);
+    read(handsFrame(),0);
+    assert.equal(read(handsFrame(key),100).press,key);
+    assert.equal(read(handsFrame(key),200).press,undefined);
+    read(handsFrame(),300);
+    assert.equal(read(handsFrame(key),400).press,key);
+  }
 });
 
 test("still, hidden, or mismatched movements do not farm points",() => {

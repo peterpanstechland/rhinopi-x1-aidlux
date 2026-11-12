@@ -32,13 +32,14 @@
     SecurityError: "当前页面没有摄像头权限。请在 localhost 或 HTTPS 页面中打开。",
   };
 
-  async function start({video, onFrame, onStatus, onError, signal}) {
+  async function start({video, onFrame, onStatus, onError, signal, getAction=()=>""}) {
     if (signal?.aborted) throw cancelError();
     if (location.protocol === "file:" || !window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
       throw new Error("摄像头体感需要 localhost 或 HTTPS。请从本机试玩地址打开，再启动摄像头。");
     }
     activeStop?.();
-    let stopped = false, stream = null, detector = null, request = 0;
+    let stopped = false, stream = null, request = 0;
+    const detectors = new Map();
     let rejectPending;
     const cancelled = new Promise((_, reject) => { rejectPending = reject; });
     // The signal can arrive after startup or while the user is choosing a camera.
@@ -61,7 +62,8 @@
           video.srcObject = null;
         }
       }
-      detector?.close();
+      for (const detector of detectors.values()) detector.close();
+      detectors.clear();
       if (activeStop === stop) activeStop = null;
     }
     function fail(message) {
@@ -86,6 +88,24 @@
         return value;
       })]);
     }
+    const kind = () => getAction()==="piano" ? "hands" : "pose";
+    async function load(kind) {
+      onStatus?.(kind==="hands" ? "正在启动十指骨骼识别…" : "正在启动本地姿态识别…");
+      const loading=modelQueue.then(async () => {
+        if (stopped) throw cancelError();
+        const {PoseLandmarker,HandLandmarker}=await import(file("vision_bundle.mjs"));
+        if (stopped) throw cancelError();
+        const hands=kind==="hands", task=hands ? HandLandmarker : PoseLandmarker;
+        return task.createFromOptions({
+          wasmLoaderPath:file("vision_wasm_nosimd_internal.js"),wasmBinaryPath:file("vision_wasm_nosimd_internal.wasm")
+        },{baseOptions:{modelAssetPath:file(hands?"hand_landmarker.task":"pose_landmarker_lite.task"),delegate:"CPU"},
+          runningMode:"VIDEO",...(hands?{numHands:2}:{numPoses:1,outputSegmentationMasks:false})});
+      });
+      modelQueue=loading.catch(()=>{});
+      const detector=await acquire(loading, model=>model.close());
+      if (stopped) {detector.close();throw cancelError();}
+      detectors.set(kind,detector);
+    }
     let stage = "camera";
     try {
       onStatus?.("等待摄像头授权…");
@@ -103,26 +123,10 @@
       video.srcObject = stream;
       await Promise.race([video.play(), cancelled]);
       stage = "model";
-      onStatus?.("正在启动本地姿态识别…");
-      // MediaPipe installs its WASM loader on the page; serialize overlapping startups.
-      const loading = modelQueue.then(async () => {
-        if (stopped) throw cancelError();
-        const {PoseLandmarker} = await import(file("vision_bundle.mjs"));
-        if (stopped) throw cancelError();
-        return PoseLandmarker.createFromOptions({
-          wasmLoaderPath:file("vision_wasm_nosimd_internal.js"),
-          wasmBinaryPath:file("vision_wasm_nosimd_internal.wasm"),
-        }, {
-          baseOptions:{modelAssetPath:file("pose_landmarker_lite.task"),delegate:"CPU"},
-          runningMode:"VIDEO",numPoses:1,outputSegmentationMasks:false,
-        });
-      });
-      modelQueue = loading.catch(() => {});
-      detector = await acquire(loading, model => model.close());
-      if (stopped) { detector.close(); throw cancelError(); }
-      onStatus?.("面向摄像头，让双肩和双手进入画面。");
+      await load(kind());
+      onStatus?.(kind()==="hands" ? "两掌朝向镜头，十指自然张开。" : "面向摄像头，让双肩和双手进入画面。");
       let lastMediaTime = -1, lastInference = -Infinity, lastFresh = performance.now(), lostReported = false;
-      function tick(now) {
+      async function tick(now) {
         if (stopped) return;
         const aspect = video.videoWidth / video.videoHeight || 4 / 3;
         const fresh = !track.muted && video.readyState >= 2 && video.currentTime !== lastMediaTime;
@@ -131,10 +135,19 @@
           lastMediaTime = video.currentTime;
           lastFresh = now;
           lostReported = false;
-          let result;
-          try { result = detector.detectForVideo(video, now); }
-          catch { fail("本地姿态识别中断，请重新开启体感。"); return; }
-          onFrame(poseFrame(result.landmarks[0], aspect, now));
+          const type=kind();
+          try {
+            if (!detectors.has(type)) await load(type);
+            if (stopped) return;
+            const result=detectors.get(type).detectForVideo(video,now);
+            if (type==="hands") {
+              const hand_points=result.landmarks.map(hand=>hand.map(p=>[1-p.x,p.y]));
+              onFrame({hand_points,pose_points:[],pose_aspect:aspect,time:now});
+            } else onFrame(poseFrame(result.landmarks[0],aspect,now));
+          } catch {
+            if (!stopped) fail(type==="hands" ? "手部识别中断，请重新开启摄像头或切换按键试玩。" : "本地姿态识别中断，请重新开启体感。");
+            return;
+          }
         } else if (!lostReported && now - lastFresh > 450) {
           lostReported = true;
           onFrame(poseFrame(null, aspect, now));
@@ -146,7 +159,7 @@
     } catch (error) {
       stop();
       if (error.name === "AbortError") throw error;
-      if (stage === "model") throw new Error("姿态模型未能启动。请用新版浏览器从 localhost 或 HTTPS 打开，并保留完整的游戏资源。", {cause:error});
+      if (stage === "model") throw new Error((kind()==="hands"?"手部":"姿态")+"模型未能启动。请从 localhost 或 HTTPS 打开，并保留完整的游戏资源。", {cause:error});
       throw new Error(cameraErrors[error.name] || "摄像头未能启动，请检查设备后再试。", {cause:error});
     }
   }

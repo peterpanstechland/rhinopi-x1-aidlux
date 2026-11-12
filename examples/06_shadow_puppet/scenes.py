@@ -135,6 +135,8 @@ class Stage:
         self.tracking = False
         self.piano_input = "fingers"
         self.frame_width = 1280
+        self.frame_height = 720
+        self.hand_points = [None, None]
         self.feedback = None
         self.feedback_seq = 0
         self.feedback_time = 0.0
@@ -160,6 +162,7 @@ class Stage:
         self.obs_cleared = False
         self.air_over = 0.0
         self.keys_lit = {}
+        self.hand_points = [None, None]
         self.notes = []
         self.press_base = {}
         self.press_armed = {}
@@ -238,6 +241,8 @@ class Stage:
                             round(float(press), 2) if key in self.press_base else None
                             for key, press in enumerate(self.finger_press)
                         ]
+            if self.scene == "piano" and self.piano_input == "fingers":
+                snapshot["visual"]["hand_points"] = self.hand_points
         return snapshot
 
     @property
@@ -257,6 +262,10 @@ class Stage:
             return "让双肩和手腕入镜"
         if self.scene == "piano" and self.piano_input == "wrists":
             return "把手腕移到亮键位置，下压再抬起"
+        if self.scene == "piano":
+            fingers = ("小指","无名指","中指","食指","拇指","拇指","食指","中指","无名指","小指")
+            side = "左手" if self.target_key < 5 else "右手"
+            return f"轻弯{side}{fingers[self.target_key]}，再伸直"
         if self.scene == "turn":
             if not self.armed:
                 return "回正再转"
@@ -345,6 +354,14 @@ class Stage:
             self.tracking = motion.face_seen
         elif self.scene == "piano" and self.piano_input == "fingers":
             self.tracking = bool(hands and hands.hands)
+            self.hand_points = [None, None]
+            if self.tracking:
+                for hand in hands.hands[:2]:
+                    if getattr(hand, "xy", None) is not None:
+                        side = int(hand.wrist[0] >= self.frame_width / 2)
+                        if self.hand_points[side] is None:
+                            self.hand_points[side] = [[round(float(x) / self.frame_width, 4),
+                                                      round(float(y) / self.frame_height, 4)] for x, y in hand.xy]
         elif self.scene == "dino":
             self.tracking = motion.shoulders_seen
         else:
@@ -585,20 +602,19 @@ class Stage:
                 self.gate_msg = "按亮着的那根"
                 self.msg_t = 0.5
                 self._event("miss", "请按亮键")
+            self.feedback["key"] = int(key)
 
         if hands is not None and getattr(hands, "hands", None):
             # screen-left hand owns the low keys, screen-right hand the high ones
-            ordered = sorted(hands.hands[:2], key=lambda h: float(h.wrist[0]))
             visible_keys = set()
             presses = []
-            for idx, hand in enumerate(ordered):
-                if len(ordered) == 1:
-                    hi = 0 if float(hand.wrist[0]) < self.frame_width * 0.5 else 1
-                else:
-                    hi = idx
+            for hand in hands.hands[:2]:
+                hi = int(hand.wrist[0] >= self.frame_width * 0.5)
+                if hi * FINGERS_PER_HAND in visible_keys:
+                    continue
                 span = max(float(hand.span), 40.0)
-                # fingers left→right, so each one lands on its own key
-                tips = sorted(hand.tips, key=lambda p: float(p[0]))
+                # Anatomical tip IDs stay on their keys even when two fingers cross.
+                tips = hand.tips if hi else hand.tips[::-1]
                 mid_y = sum(float(t[1]) for t in tips) / len(tips)
                 for fi, tip in enumerate(tips):
                     key = hi * FINGERS_PER_HAND + fi

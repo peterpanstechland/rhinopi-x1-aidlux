@@ -664,38 +664,32 @@ def slalom(t):
     return frame
 
 
+@lru_cache(maxsize=1)
+def piano_instrument():
+    return Image.open(ART/"piano-instrument.png").convert("RGBA")
+
+
 def music_station(t):
-    im=plate(3);d=ImageDraw.Draw(im)
-    colors=("#b6d9b7","#f4c793","#d8b5df","#93d3d0")
     times=(.60,1.15,1.70,2.25)
-    keys=tuple(57+i*24 for i in range(10))
-    # Last four targets in CameraRound's eight-note melody.
-    xs=tuple(keys[i] for i in (1,8,4,5))
-    box(d,39,113,259,78,"#353448");box(d,41,115,255,70,"#75657b")
-    current=sum(t>=moment+.10 for moment in times)
-    for i,x in enumerate(keys):
-        active=xs.index(x) if x in xs else None
-        press=0 if active is None else bump(times[active]-.12,times[active],times[active]+.22,t)
-        dip=round(7*press)
-        col="#ffda82" if active==current else "#e4d6be"
-        box(d,x-11,130+dip,23,37,INK);box(d,x-9,132+dip,19,29,col)
-        box(d,x-9,162+dip,19,3,"#a99590")
-        if i in (0,1,3,4,5,7,8):box(d,x+6,129+dip,9,14,"#484252")
-    for j,(x,col,at) in enumerate(zip(xs,colors,times)):
-        box(d,x-16,123,31,3,col if t>=at else "#4d485e")
-        if t>=at:
-            path(d,[(x,119),(x,107-j*3),(291,107-j*3),(303,95-j*2)],col,2)
-    frame=im.resize(OUTPUT,NEAREST)
-    robot_world(frame,"nod",.2+.68*max(0,math.cos((t-.60)*math.tau/.55)),331,132,.68)
-    hand,px,py=cast.pointing(True)
-    path_x=track([(0,43),(.48,xs[0]),(.64,xs[0]),(1.04,xs[1]),(1.21,xs[1]),
-                  (1.59,xs[2]),(1.76,xs[2]),(2.14,xs[3]),(2.32,xs[3]),(3.50,271)],t)
-    height=126+19*max(bump(at-.11,at,at+.20,t) for at in times)
-    frame.paste(hand,(round(path_x*2-px),round(height*2-py)),hand)
-    fg=Image.new("RGBA",(384,216));d=ImageDraw.Draw(fg)
+    note=min(3,sum(t>=at+.20 for at in times))
+    at=times[note]
+    bend=bump(at-.16,at,at+.20,t)
+    phase=4 if t>=at+.18 else round(3*bend)
+    tile=piano_instrument().crop((384*note,210*phase+32,384*(note+1),210*(phase+1)))
+    frame=plate(3).resize(OUTPUT,NEAREST)
+    # The same fingertip highlights, ten physical keys and target names as the live game.
+    screen=tile.resize((570,254),Image.Resampling.NEAREST)
+    frame.paste(screen,(17,116),screen)
+    robot_world(frame,"nod",.2+.68*max(0,math.cos((t-.60)*math.tau/.55)),329,155,.74)
+    fx=Image.new("RGBA",(384,216));d=ImageDraw.Draw(fx)
+    for i,moment in enumerate(times):
+        if t>=moment:
+            y=94+i*5
+            path(d,[(286,y),(297+i*2,y),(307+i*2,y-10)],("#b6d9b7","#f4c793","#d8b5df","#93d3d0")[i],2)
     if 2.25<t<=3.14:
-        f=ease(2.25,3.27,t);pulse(d,mix(262,369,f),mix(116,85,f),.9)
-    fg=fg.resize(OUTPUT,NEAREST);frame.paste(fg,(0,0),fg)
+        travel=ease(2.25,3.27,t)
+        pulse(d,mix(289,369,travel),mix(104,85,travel),.9)
+    fx=fx.resize(OUTPUT,NEAREST);frame.paste(fx,(0,0),fx)
     return frame
 
 
@@ -826,7 +820,7 @@ def beat_room(t):
 
 ROUTE=(
     ("老鹰起飞","扇翅升空",flight,2.95),("月台挥手","挥手送别",platform,2.36),
-    ("雪岭穿梭","侧倾过旗门",slalom,2.55),("落日合奏","对准亮键下压",music_station,2.31),
+    ("雪岭穿梭","侧倾过旗门",slalom,2.55),("落日合奏","跟亮键弯指弹奏",music_station,2.31),
     ("仙人掌跳跃","轻挺上身起跳",sand_run,2.43),("左右转头","对准两盏灯",lookout,2.06),
     ("节拍点头","点头合拍",beat_room,3.03))
 

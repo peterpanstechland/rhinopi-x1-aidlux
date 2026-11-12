@@ -3,7 +3,7 @@
   'use strict';
   const W = 384, H = 216, CENTER = W / 2, FLOOR = 189;
   const INK = '#202638', MINT = '#a2efb2', GOLD = '#ffdc99', CORAL = '#ed8d88';
-  const plates = { night: 0, wings: 1, flap: 1, wave: 0, lean: 2, piano: 3, hands_up: 1, turn: 0, nod: 3 };
+  const plates = { night: 0, wings: 1, flap: 2, wave: 0, lean: 2, piano: 3, hands_up: 1, turn: 0, nod: 3 };
   const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)');
   const loading = new Map();
   let images;
@@ -149,64 +149,115 @@
       rect(c,x+10,y+10,24,16,'#a8c38a');rect(c,x+10,y+8,25,4,'#ed5225');
     }
   }
+  let wingSprite;
+  function gliderWing(c,side,angle) {
+    if(!wingSprite) {
+      wingSprite=document.createElement("canvas");wingSprite.width=54;wingSprite.height=41;
+      const w=wingSprite.getContext("2d");w.translate(1,16);
+      path(w,[[0,1],[5,-3],[14,-5],[23,-4],[32,-5],[40,-9],[48,-15],[50,-15],[49,-8],[45,-3],[41,0],[46,-2],[45,2],[40,7],[34,10],[38,9],[35,14],[28,18],[20,19],[23,20],[17,22],[10,20],[5,16],[1,9]],'#614956');
+      path(w,[[1,1],[6,-2],[15,-4],[24,-3],[33,-4],[41,-8],[48,-13],[47,-8],[41,-2],[32,3],[21,7],[9,9],[3,7]],'#fff0bc');
+      path(w,[[3,6],[14,5],[25,2],[36,-1],[43,-4],[39,0],[27,6],[16,11],[7,12]],'#eed09b');
+      path(w,[[4,9],[12,9],[24,6],[38,1],[44,-1],[41,4],[34,8],[24,11],[15,14],[8,14]],'#d4e1b5');
+      path(w,[[7,13],[16,12],[26,10],[35,7],[31,10],[22,14],[13,17],[8,16]],'#9cc6b2');
+      path(w,[[9,16],[20,14],[31,11],[35,10],[31,14],[26,16],[16,18],[11,18]],'#bed8b5');
+      path(w,[[7,15],[13,18],[21,17],[16,20],[11,19]],'#82a99d');
+      path(w,[[1,1],[8,-2],[16,-3],[23,-2],[26,-3],[24,0],[20,2],[16,2],[14,4],[10,5],[7,5],[5,7],[2,7]],'#dc9a63');
+      path(w,[[2,1],[8,-1],[15,-2],[22,-1],[19,1],[14,1],[10,3],[5,4],[2,5]],'#ffdc91');
+      rect(w,6,0,6,1,'#fff2be');rect(w,18,5,4,1,'#fff2cb');rect(w,25,3,5,1,'#fff2cb');
+    }
+    c.save(); c.translate(side*9,-33); c.scale(side,1); c.rotate(angle);
+    c.drawImage(wingSprite,-1,-16);
+    c.restore();
+  }
+  function sportAvatar(c,pose,at,action,visual,time,scale) {
+    const flight=action==='flap', bank=clamp(number(visual.avatar_dx)/58,-1,1);
+    const arms=[limbs(pose,0,0),limbs(pose,1,0)];
+    const angles=arms.map((a,i)=>clamp(Math.atan2(a.hand.y-a.shoulder.y,(i?1:-1)*(a.hand.x-a.shoulder.x)),-1.15,1.15));
+    const bob=flight ? -3*Math.cos((angles[0]+angles[1])*.5+1.6) : 0;
+    const hip={x:flight?0:bank*5,y:flight?-23+bob:-18};
+    const neck={x:hip.x+(flight?0:bank*6),y:hip.y-15};
+    c.save(); c.translate(round(at.x),round(at.y)); c.scale(scale*1.32,scale*1.32);
+    if (flight) {
+      for (const i of [0,1]) gliderWing(c,i?1:-1,angles[i]);
+      leg(c,{x:-4,y:hip.y},{x:-10,y:-15+bob},{x:-15,y:-10+bob},false);
+      leg(c,{x:5,y:hip.y},{x:9,y:-13+bob},{x:7,y:-3+bob},true);
+    } else {
+      // Boots sit on separate runners. The hips move over the inside edge during a turn.
+      for (const [i,y] of [[0,-2],[1,2]]) {
+        const x=i?5:-7;
+        path(c,[[x-21,y-1],[x-17,y+1],[x+14,y],[x+23,y-4],[x+21,y],[x+15,y+3],[x-17,y+4],[x-22,y+1]],'#47354a');
+        line(c,{x:x-16,y:y+1},{x:x+14,y},2,i?'#ffb675':'#98dacf');
+      }
+      leg(c,{x:hip.x-4,y:hip.y},{x:-8+bank*6,y:-10},{x:-9,y:-2},false);
+      leg(c,{x:hip.x+5,y:hip.y},{x:9+bank*6,y:-8},{x:8,y:1},true);
+    }
+    const tail=round(Math.sin(time*6)*1.5);
+    const scarf=flight||bank>=0?-1:1;
+    c.save();c.translate(neck.x,neck.y+6);c.scale(scarf,1);
+    path(c,[[0,0],[9,1],[18,-4],[27,-3+tail],[22,0+tail],[26,2+tail],[15,2],[8,6],[0,5]],'#763340');
+    path(c,[[0,1],[9,2],[18,-2],[24,-2+tail],[18,0],[9,5],[0,4]],'#ff7443');c.restore();
+    part(c,2,hip.x-23,hip.y-27);
+    if (!flight) {
+      for (const side of [-1,1]) {
+        const hand={x:neck.x+side*23,y:hip.y-14-side*bank*5};
+        const tip={x:hand.x+side*7-bank*8,y:-1};
+        line(c,hand,tip,2,'#3b4552');line(c,{x:tip.x-3,y:tip.y-2},{x:tip.x+3,y:tip.y-2},2,'#e1ae7d');
+        arm(c,{shoulder:{x:hip.x+side*10,y:hip.y-15},elbow:{x:hip.x+side*16,y:hip.y-9},hand});
+      }
+    } else {
+      for (let i=0;i<2;i++) {
+        const side=i?1:-1, a=angles[i], shoulder={x:side*9,y:-33};
+        const elbow={x:side*(9+11*Math.cos(a)),y:-32+10*Math.sin(a)};
+        const hand={x:side*(9+21*Math.cos(a)),y:-34+20*Math.sin(a)};
+        arm(c,{shoulder,elbow,hand});
+      }
+    }
+    c.save(); c.translate(round(neck.x),round(neck.y)); c.rotate(flight ? (angles[1]-angles[0])*.07 : bank*.15);
+    if (!flight && bank<-.35) c.scale(-1,1);
+    part(c,Math.abs(bank)>.35?1:0,-24,-40);c.restore();
+    c.restore();
+  }
   function player(c, pose, at, action, visual, time, scale, celebrate) {
+    if (action==='flap'||action==='lean') return sportAvatar(c,pose,at,action,visual,time,scale);
     const size = scale * (action === 'piano' ? 1.23 : 1.32);
-    const onBoard=action==='lean'||action==='flap';
-    const steering=clamp(number(visual.avatar_dx)/58,-1,1);
     const freeArms=[limbs(pose,0,0),limbs(pose,1,celebrate?1.8:.45)];
-    const stroke=clamp((freeArms[0].hand.y-freeArms[0].shoulder.y+18)/40,0,1);
-    const pressure=action==='lean' ? Math.abs(steering) : stroke;
     const faceVisible=Boolean(point(pose.points,0));
     const turn=action==='turn'&&faceVisible ? clamp(number(visual.head_turn,pose.yaw/.17),-1,1) : 0;
     const dip=action==='nod'&&faceVisible ? clamp(number(visual.head_dip,pose.nod/2),0,1) : 0;
     const airborne=action==='hands_up' ? clamp(-number(visual.avatar_dy)/45,0,1) : 0;
     const breath=pose.points.length ? 0 : Math.sin(time*2)*.75;
-    const hip={x:onBoard?48+5*steering:52,y:onBoard?63+5*pressure:65+2*dip-5*airborne+breath};
-    const neck={x:hip.x+(onBoard?13:2*turn),y:hip.y-(onBoard?15:23)};
+    const hip={x:52,y:65+2*dip-5*airborne+breath};
+    const neck={x:hip.x+2*turn,y:hip.y-23};
     c.save();
     c.translate(round(at.x),round(at.y));
     c.scale(size,size); c.translate(-52,-83);
     const arms=freeArms.map((limb,i)=>{
-      const x=onBoard?hip.x+(i?15:3):hip.x+(i?11:-11);
-      const y=hip.y+(onBoard?(i?-14:-11):-17)+pose.tilt*(i?1:-1);
+      const x=hip.x+(i?11:-11);
+      const y=hip.y-17+pose.tilt*(i?1:-1);
       const dx=x-limb.shoulder.x,dy=y-limb.shoulder.y;
       const offset=p=>({x:p.x+dx,y:p.y+dy});
       return {shoulder:offset(limb.shoulder),elbow:offset(limb.elbow),hand:offset(limb.hand),tracked:limb.tracked};
     });
-    const feet=onBoard?[[32,83],[64,81]]:[[41-5*airborne,83-7*airborne],[63+2*airborne,83-15*airborne]];
-    const knees=onBoard?[[35-4*pressure,67+3*pressure],[65+3*pressure,66+4*pressure]]:
-      [[41-7*airborne,73-12*airborne],[61+8*airborne,72-18*airborne]];
+    const feet=[[41-5*airborne,83-7*airborne],[63+2*airborne,83-15*airborne]];
+    const knees=[[41-7*airborne,73-12*airborne],[61+8*airborne,72-18*airborne]];
     for(let i=0;i<2;i++) leg(c,{x:hip.x+(i?5:-5),y:hip.y},{x:knees[i][0],y:knees[i][1]},
       {x:feet[i][0],y:feet[i][1]},Boolean(i));
-    const tail=onBoard ? Math.sin(time*7)*2-2 : 0;
+    const tail=0;
     c.save();
-    c.translate(round(neck.x+(onBoard?-5:9)),round(neck.y+(onBoard?-3:4)));
-    if(onBoard) c.scale(-1,1);
+    c.translate(round(neck.x+9),round(neck.y+4));
     path(c,[[0,0],[5,1],[13,-2+tail],[21,-3+tail],[23,-1+tail],[20,2+tail],
       [21,5+tail],[14,4+tail],[9,6],[14,9+tail],[8,11+tail],[2,8],[-2,5]],'#42142b');
     path(c,[[1,2],[6,2],[14,-1+tail],[21,-1+tail],[18,2+tail],[19,3+tail],[14,2+tail],[8,5],[2,4]],'#f05325');
     path(c,[[1,5],[5,5],[12,7+tail],[13,9+tail],[8,9+tail],[7,10+tail],[3,8]],'#ca3823');
     c.restore();
-    if (action==='flap') {
-      for (const {shoulder,hand,tracked} of arms) {
-        const dx=hand.x-shoulder.x, dy=hand.y-shoulder.y;
-        if (!tracked || Math.abs(dx)<10) continue;
-        // Feathers follow each wing's actual slope, with their tips trailing below.
-        for (let i=0;i<3;i++) {
-          const t=.40+i*.18, x=shoulder.x+dx*t, y=shoulder.y+dy*t;
-          const sign=Math.sign(dx);
-          path(c,[[x,y],[x+sign*6,y+dy*.16],[x+sign*(3-i),y+9-i]],i===1?MINT:'#72c3b0');
-        }
-      }
-    }
     arm(c,arms[0]);
-    part(c,onBoard?3:2,hip.x-(onBoard?20:23),hip.y-(onBoard?26:27));
-    const profile=onBoard||Math.abs(turn)>.42;
+    part(c,2,hip.x-23,hip.y-27);
+    const profile=Math.abs(turn)>.42;
     c.save();
     c.translate(round(neck.x+pose.yaw*3+4*turn),round(neck.y+6*dip));
     if (turn<-.42) c.scale(-1,1);
     const blink=action==='wave' && time%3.5>3.35;
-    part(c,(blink?6:0)+(profile?1:0),onBoard?-22:-24,onBoard?-43:-42,48,round(48-7*dip));
+    part(c,(blink?6:0)+(profile?1:0),-24,-42,48,round(48-7*dip));
     c.restore();
     arm(c,arms[1]);
     for (const {elbow,hand,shoulder,tracked} of arms) {
@@ -379,17 +430,19 @@
     const pose=poseInfo(snapshot), time=reducedMotion?.matches ? 0 : performance.now()/1000;
     const summary=snapshot.phase==='summary', clear=roundActive && snapshot.sub==='clear' && progress>=1;
     const at={x:CENTER, y:FLOOR};
-    background(c,plates[action] ?? 0);
+    scenery(c,action);
+    if (action==='piano' && (challenge.piano_input || visual.piano_input)==='fingers' && visual.hand_points) {
+      window.PianoStage.draw(c,W,H,visual,{aspect:snapshot.pose_aspect || 1,count:challenge.count,ready:snapshot.sub==='ready'});
+      if(clear) confetti(c,time);
+      return;
+    }
     if(action==='lean') {
       at.x+=clamp(number(visual.avatar_dx, pose.yaw*56),-65,65)*1.65;
       slalom(c,visual);
     } else if(action==='flap') {
-      at.y-=clamp(number(visual.alt,progress*56),0,56)*.77;
-      flag(c,304,FLOOR-39,74,progress>=1);
-      for(let i=0;i<4;i++) {
-        const x=72+i*61, y=(37+i*39+(FLOOR-at.y)*.4)%128+25;
-        rect(c,x,y,13+i*3,2,'#efd6c6');rect(c,x+4,y-2,8,2,'#efd6c6');
-      }
+      at.y-=15+clamp(number(visual.alt,progress*56),0,56)*.67;
+      // Each successful downstroke lifts the pilot toward the summit marker.
+      flag(c,337,FLOOR-13,64,progress>=1);
     } else if(action==='wave') {
       train(c,progress);
     } else if(action==='hands_up') {
@@ -401,17 +454,12 @@
       venueLights(c,action,progress,visual);
     }
     const shadowWidth=clamp(52-(FLOOR-at.y)*.4,19,52);
-    rect(c,at.x-shadowWidth/2,FLOOR+1,shadowWidth,3,'#4c4759');
-    rect(c,at.x-shadowWidth*.35,FLOOR+4,shadowWidth*.7,1,'#575362');
+    if(action!=='flap'){
+      rect(c,at.x-shadowWidth/2,FLOOR+1,shadowWidth,3,'#4c4759');
+      rect(c,at.x-shadowWidth*.35,FLOOR+4,shadowWidth*.7,1,'#575362');
+    }
     player(c,pose,at,action,visual,time,1,summary||clear);
     if(action==='piano') keyboard(c,visual,progress,pose.points,challenge.tracking!==false);
-    if(action==='lean'||action==='flap'){
-      const x=at.x,y=at.y;
-      path(c,[[x-43,y-3],[x-33,y+1],[x+25,y-1],[x+42,y-7],[x+36,y],
-        [x+27,y+3],[x-34,y+5],[x-44,y]],INK);
-      path(c,[[x-40,y-2],[x-32,y],[x+25,y-2],[x+40,y-6],[x+33,y-1],
-        [x+25,y+1],[x-33,y+3]],action==='lean'?'#df8876':'#ffbd74');
-    }
     if (clear || (summary && snapshot.cleared > 0)) confetti(c,time);
     if (snapshot.phase==='alert') {
       // An empty battery sits beside the player while the board waits for their first motion.
@@ -437,8 +485,26 @@
     ensureImages();
     context.save();
     context.scale(width/W,height/H);
-    background(context,plates[action] ?? plates.night);
+    scenery(context,action);
     context.restore();
+  }
+  function scenery(c,action) {
+    if(action!=='flap') {background(c,plates[action] ?? plates.night);return;}
+    const sky=['#8686ad','#a198b8','#c3a8b8','#e3b6b2','#f4c6aa','#f9d3ae'];
+    sky.forEach((t,i)=>rect(c,0,i*36,W,36,t));
+    const sx=281;
+    for(let y=-25;y<=25;y+=2) {
+      const half=round(Math.sqrt(Math.max(0,625-y*y)));
+      rect(c,sx-half,45+y,2*half,2,'#ffe3a9');
+    }
+    path(c,[[0,166],[27,153],[53,160],[99,131],[129,148],[161,139],[187,151],[223,119],[255,145],[296,130],[342,153],[384,137],[384,216],[0,216]],'#bc9fac');
+    path(c,[[0,184],[44,170],[77,175],[113,156],[164,182],[199,163],[247,178],[284,154],[326,177],[384,153],[384,216],[0,216]],'#9d8ea7');
+    const drift=reducedMotion?.matches?0:(performance.now()/420)%425;
+    for (const [start,y,w] of [[29,52,43],[173,68,30],[370,38,52],[63,130,57],[311,159,69],[130,194,91]]) {
+      const x=(start-drift+425)%425-25;
+      rect(c,x,y,w,3,'#f8dec0');rect(c,x+w*.2,y-3,w*.55,4,'#ffe9c9');rect(c,x+w*.36,y-6,w*.19,4,'#fff1d5');
+      rect(c,x+4,y+3,w*.64,2,'#dfbab1');
+    }
   }
   window.MotionStage = {paint,paintAvatar,paintBackdrop};
 })();

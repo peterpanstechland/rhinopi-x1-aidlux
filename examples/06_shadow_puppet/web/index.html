@@ -16,6 +16,8 @@
   <script defer src="soundtrack.js"></script>
   <script defer src="extra-games.js"></script>
   <script defer src="play.js"></script>
+  <script defer src="finger-piano.js"></script>
+  <script defer src="piano-stage.js"></script>
   <script defer src="motion-stage.js"></script>
   <script defer src="action-coach.js"></script>
   <script defer src="camera-input.js"></script>
@@ -86,7 +88,7 @@
       <div id="board-live">
         <div class="live-grid"><div class="live-display">
           <div class="stage-toolbar"><span class="eyebrow" id="stage-heading">LIVE STAGE</span><div class="stage-views" role="group" aria-label="体感画面"><button id="show-stage" aria-pressed="true"><i data-icon="pad"></i>像素舞台</button><button id="show-camera" aria-pressed="false"><i data-icon="scan"></i>摄像头</button></div></div>
-          <div class="live-frame"><canvas id="motion-canvas" width="384" height="216" aria-label="玩家驱动的像素舞台"></canvas><video id="local-video" muted playsinline autoplay hidden aria-label="本机镜像摄像头"></video><img id="stream" hidden alt="实时摄像头与原始动作反馈"><div id="stream-wait" hidden>正在接入画面…</div><div id="hit-feedback" role="status" hidden></div></div>
+          <div class="live-frame"><canvas id="motion-canvas" width="384" height="216" aria-label="玩家驱动的像素舞台"></canvas><video id="local-video" muted playsinline autoplay hidden aria-label="本机镜像摄像头"></video><canvas id="hand-overlay" hidden aria-hidden="true"></canvas><img id="stream" hidden alt="实时摄像头与原始动作反馈"><div id="stream-wait" hidden>正在接入画面…</div><div id="hit-feedback" role="status" hidden></div></div>
           <div class="stage-prompt" id="stage-prompt">
             <div class="stage-prompt-line"><strong id="stage-now">跟小电做动作</strong><span id="stage-count" hidden></span></div>
             <progress id="stage-progress" max="1" value="0" hidden aria-label="本关动作完成量"></progress>
@@ -136,7 +138,7 @@
       <button type="button" id="film-play">暂停</button><button type="button" id="film-audio">开启声音</button>
       <button type="button" id="film-trial" hidden></button>
     </div>
-    <details id="film-story"><summary>看文字版</summary><div id="film-story-text"><p>下班前，开发者还在修最后一个 bug。两小时过去，他伏在桌上，肩和腰都酸了。游戏里的八座信号站熄了灯，小电跳出屏幕，邀他站起来，一起把信号送回城里。</p><p>他打开摄像头，双臂平举五秒，点亮天台。跟着小电扇翅升空、向月台乘客挥手、侧身穿过雪岭旗门。他对准亮键压下手腕，琴声把信号送到沙漠。他轻轻挺起上身，画面里的角色跳过仙人掌。左右转头对准灯塔，再随节拍点头，第八盏灯亮起，整座城恢复供电。</p><p>回到工位，他松开扶腰的手，点了「休息一下」。那个 bug 还在，但今晚多了一张八关战报，可以约同事再玩一轮。</p></div></details>
+    <details id="film-story"><summary>看文字版</summary><div id="film-story-text"><p>下班前，开发者还在修最后一个 bug。两小时过去，他伏在桌上，肩和腰都酸了。游戏里的八座信号站熄了灯，小电跳出屏幕，邀他站起来，一起把信号送回城里。</p><p>他打开摄像头，双臂平举五秒，点亮天台。跟着小电扇翅升空、向月台乘客挥手、侧身穿过雪岭旗门。他跟着亮键逐指弹奏，琴声把信号送到沙漠。他轻轻挺起上身，画面里的角色跳过仙人掌。左右转头对准灯塔，再随节拍点头，第八盏灯亮起，整座城恢复供电。</p><p>回到工位，他松开扶腰的手，点了「休息一下」。那个 bug 还在，但今晚多了一张八关战报，可以约同事再玩一轮。</p></div></details>
   </dialog>
   <dialog id="help-dialog" class="help-dialog" aria-labelledby="help-title"><div class="modal-top"><img src="art/bot.png" alt="" width="38" height="38"><button class="icon-button" id="close-help" aria-label="关闭说明"><i data-icon="close"></i></button></div>
     <h2 id="help-title">怎么玩？</h2>
