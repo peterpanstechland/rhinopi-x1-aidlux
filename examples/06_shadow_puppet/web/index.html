@@ -43,7 +43,7 @@
     <section id="view-lobby" aria-label="街机大厅">
       <div class="hero">
         <div class="hero-picture"></div>
-        <div class="hero-copy">
+        <div class="hero-copy" id="lobby-intro">
           <span class="hero-kicker"><span class="broadcast" aria-hidden="true"></span> ROOFTOP STATION</span>
           <h1>天台回血站<span class="title-dot">.</span></h1>
           <p>展翅、挥手、滑雪、跳跃……八款动作游戏，任选一关。<br>也可以跟着小电，从天台一路玩到最后一个节拍。</p>
@@ -51,6 +51,16 @@
             <a class="button primary" id="hero-motion" href="#board"><i data-icon="scan"></i><span>体感八关连闯</span></a>
             <a class="button glass" href="#cartridges"><i data-icon="grid"></i>选择单关</a>
           </div>
+        </div>
+        <div class="hero-copy" id="film-followup" hidden>
+          <span class="hero-kicker">工位回血</span>
+          <h1 tabindex="-1" id="followup-title">夜班行动<span class="title-dot">.</span></h1>
+          <p id="followup-instruction">跟小电从天台展翅出发，用八种动作连闯八关。</p>
+          <div class="hero-actions">
+            <a class="button primary" id="followup-motion" href="#board"><i data-icon="scan"></i><span>体感八关连闯</span></a>
+            <a class="button glass" id="followup-keys" href="#cartridges"><i data-icon="pad"></i>键盘 / 触屏选关</a>
+          </div>
+          <a class="text-link followup-deck" id="followup-wings" href="#board/wings">先练天台展翅<i data-icon="arrow"></i></a>
         </div>
         <button id="replay-opening" class="hero-frequency" type="button"><i data-icon="play"></i> 观看开场动画</button>
       </div>
@@ -111,15 +121,15 @@
     <footer><span><img src="icon.svg" alt=""> RE:CHARGE ARCADE</span><span><b></b> <span id="foot-mode">浏览器街机</span></span></footer>
   </main>
   <dialog id="opening-dialog" aria-labelledby="opening-title">
-    <div class="film-head"><div><small>工位回血 · 序章</small><h2 id="opening-title">还差一个 bug</h2></div><button type="button" id="skip-opening" class="film-skip" autofocus>跳过片头 <span aria-hidden="true">→</span></button></div>
+    <div class="film-head"><div><small>工位回血 · 序章</small><h2 id="opening-title">夜班行动</h2></div><button type="button" id="skip-opening" class="film-skip" autofocus>跳过片头 <span aria-hidden="true">→</span></button></div>
     <div class="film-frame"><video id="opening-film" playsinline preload="none" muted aria-labelledby="opening-title" aria-describedby="film-story-text"></video></div>
-    <progress id="film-progress" value="0" max="22.5" aria-label="片头播放进度"></progress>
+    <progress id="film-progress" value="0" max="54.5" aria-label="片头播放进度"></progress>
     <p id="film-error" role="status" hidden>片头视频未能载入，可以看文字版或跳过片头。</p>
     <div class="film-controls">
       <button type="button" id="film-play">暂停</button><button type="button" id="film-audio">开启声音</button>
-      <span id="film-time" aria-hidden="true">00:00 / 00:23</span>
+      <span id="film-time" aria-hidden="true">00:00 / 00:55</span>
     </div>
-    <details id="film-story"><summary>看文字版</summary><p id="film-story-text">开发者坐了两个小时，肩和腰都酸了，还惦记着最后一个 bug。屏幕里的小电跳上桌，叫他起来跟自己做「天台展翅」。两个人把双臂平举五秒，游戏随之过关。他放下肩膀，松开扶腰的手，笑着点了「休息一下」。那个 bug，等会儿再修。</p></details>
+    <details id="film-story"><summary>看文字版</summary><div id="film-story-text"><p>下班前，开发者还在修最后一个 bug。两小时过去，他伏在桌上，肩和腰都酸了。游戏里的八座信号站熄了灯，小电跳出屏幕，邀他站起来，一起把信号送回城里。</p><p>他打开摄像头，双臂平举五秒，点亮天台。跟着小电扇翅升空、向月台乘客挥手、侧身穿过雪岭旗门。他对准亮键压下手腕，琴声把信号送到沙漠。他轻轻挺起上身，画面里的角色跳过仙人掌。左右转头对准灯塔，再随节拍点头，第八盏灯亮起，整座城恢复供电。</p><p>回到工位，他松开扶腰的手，点了「休息一下」。那个 bug 还在，但今晚多了一张八关战报，可以约同事再玩一轮。</p></div></details>
   </dialog>
   <dialog id="help-dialog" class="help-dialog"><div class="modal-top"><span class="eyebrow">PLAYER GUIDE</span><button class="icon-button" id="close-help" aria-label="关闭说明"><i data-icon="close"></i></button></div>
     <h2>怎么玩？</h2><dl><dt>体感舞台</dt><dd>选一个动作单练，或挑战全部八关。先看示范，再打开摄像头跟做。犀牛派默认每轮抽取六个动作。</dd><dt>键盘 / 触屏</dt><dd>在挑战卡带上方切换操作方式，八款游戏都能用键盘和触屏玩。</dd><dt>带走战报</dt><dd>结束后可以保存像素战报，也可以把挑战链接发给朋友。最近的成绩保存在当前浏览器。</dd></dl><button class="button primary" id="help-done">知道了<i data-icon="arrow"></i></button>

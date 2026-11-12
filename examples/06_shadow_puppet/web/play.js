@@ -652,6 +652,7 @@
     const body = el("div", "dp-result");
     const poster = el("div", "dp-poster");
     poster.style.setProperty("--dp-poster-art", "url('art/" + name + ".png')");
+    if (name === "hero") poster.style.setProperty("--dp-poster-position", "right center");
     const date = new Date(r.at).toLocaleDateString("zh-CN");
     const big = el("div", "dp-score-row");
     big.append(el("strong", "", String(r.score)), el("small", "", "PT"));
@@ -774,7 +775,8 @@
     if (image && image.complete && image.naturalWidth) {
       const scale=Math.max(708/image.naturalWidth,310/image.naturalHeight);
       const sw=708/scale, sh=310/scale;
-      ctx.drawImage(image,(image.naturalWidth-sw)/2,(image.naturalHeight-sh)/2,sw,sh,46,156,708,310);
+      const left=(image.naturalWidth-sw)*(resultArt(result)==="hero" ? 1 : .5);
+      ctx.drawImage(image,left,(image.naturalHeight-sh)/2,sw,sh,46,156,708,310);
     } else {
       ctx.save();
       ctx.translate(380,385);

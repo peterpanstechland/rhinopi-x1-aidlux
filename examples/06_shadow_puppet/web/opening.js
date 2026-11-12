@@ -4,7 +4,24 @@
   const dialog = get("opening-dialog");
   const film = get("opening-film");
   const audio = window.DeskAudio;
-  const storageKey = "desk.opening.seen.v1";
+  const storageKey = "desk.opening.night-shift.seen.v1";
+  const followup = get("film-followup");
+  const onBoard = document.documentElement.dataset.device === "board";
+  const canPlayMotion = location.protocol !== "file:" && window.isSecureContext && Boolean(navigator.mediaDevices?.getUserMedia);
+  if (onBoard) {
+    get("followup-motion").querySelector("span").textContent = "进入犀牛派体感舞台";
+    get("followup-wings").hidden = true;
+    get("followup-instruction").textContent = "站到犀牛派摄像头前，跟着小电做本轮抽到的动作。";
+  } else if (!canPlayMotion) {
+    get("followup-motion").hidden = true;
+    get("followup-keys").classList.replace("glass", "primary");
+    get("followup-wings").hidden = true;
+    get("followup-instruction").textContent = "八张卡带，任选一关，用键盘或触屏开始挑战。";
+  }
+  function showFollowup(visible) {
+    get("lobby-intro").hidden = visible;
+    followup.hidden = !visible;
+  }
   const stamp = seconds => "00:" + String(Math.floor(seconds)).padStart(2, "0");
   function updateTime() {
     const time = film.currentTime;
@@ -26,6 +43,8 @@
   }
   function show(gesture = false) {
     if (dialog.open) return;
+    showFollowup(false);
+    dialog.returnValue = "";
     audio.scene(null);
     get("film-story").open = false;
     if (!film.hasAttribute("src")) {
@@ -55,7 +74,7 @@
   });
   for (const event of ["loadedmetadata", "timeupdate", "seeked"]) film.addEventListener(event, updateTime);
   for (const event of ["play", "pause", "volumechange"]) film.addEventListener(event, updateControls);
-  film.addEventListener("ended", () => { if (dialog.open) dialog.close(); });
+  film.addEventListener("ended", () => { if (dialog.open) dialog.close("play-next"); });
   film.addEventListener("error", () => { get("film-error").hidden = false; });
   film.addEventListener("loadeddata", () => { get("film-error").hidden = true; });
   dialog.addEventListener("close", () => {
@@ -63,8 +82,13 @@
     try { localStorage.setItem(storageKey, "yes"); } catch {}
     if (location.hash === "#opening") history.replaceState(null, "", "#lobby");
     audio.restoreScene();
+    if (dialog.returnValue === "play-next" && !get("view-lobby").hidden) {
+      showFollowup(true);
+      get("followup-title").focus();
+    }
   });
   window.addEventListener("hashchange", () => {
+    showFollowup(false);
     if (location.hash === "#opening") show(true);
     else if (dialog.open) dialog.close();
   });

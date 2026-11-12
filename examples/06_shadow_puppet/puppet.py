@@ -13,11 +13,11 @@ from pixel_ui import LIME, PixelScreen
 from pose_tracker import PoseResult
 
 # Colors are BGRA on the logical pixel canvas.
-INK = (56, 38, 32, 255)
-SLEEVE = (139, 140, 67, 255)
-MINT = (167, 219, 136, 255)
-GLOVE = (163, 196, 115, 255)
-LIGHT = (174, 236, 196, 255)
+INK = (43, 20, 66, 255)
+SLEEVE = (121, 173, 131, 255)
+MINT = (139, 206, 181, 255)
+GLOVE = (160, 225, 252, 255)
+LIGHT = (181, 241, 255, 255)
 GOLD = (153, 220, 255, 255)
 VIOLET = (251, 183, 203, 255)
 PAD = np.array([24, 9])

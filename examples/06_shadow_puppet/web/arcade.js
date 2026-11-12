@@ -89,7 +89,12 @@
       deck.append(card);
     }
   }
-  $("mode-keys").addEventListener("click", () => {deckMotion=false; renderDeck();});
+  function chooseKeyboard() {
+    deckMotion = false;
+    renderDeck();
+  }
+  $("mode-keys").addEventListener("click", chooseKeyboard);
+  $("followup-keys").addEventListener("click", chooseKeyboard);
   $("mode-motion").addEventListener("click", () => {deckMotion=true; renderDeck();});
   if (boardMode) {
     $("mode-motion").hidden=true;

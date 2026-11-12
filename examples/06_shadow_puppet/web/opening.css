@@ -1,6 +1,8 @@
 .hero-frequency {min-height:34px;padding:0 13px;border:1px solid #827f93;background:#191827de;font:650 12px var(--body);color:#f4f3f8}
 .hero-frequency:hover {background:#343144;color:var(--mint)}
 .hero-frequency .ico {width:12px;height:12px;color:var(--mint)}
+.followup-deck {margin-top:15px;min-height:32px}
+#followup-title:focus {outline:0}
 #opening-dialog {width:min(780px,calc(100% - 28px),calc((100dvh - 175px) * 1.78));max-height:96dvh;padding:0;overflow:auto;color:var(--ink);background:#191922;border:1px solid #605a72;border-radius:10px;box-shadow:0 30px 100px #05040abf}
 #opening-dialog::backdrop {background:#090911ed}
 .film-head,.film-controls {display:flex;align-items:center;justify-content:space-between;gap:12px;padding:13px 20px}

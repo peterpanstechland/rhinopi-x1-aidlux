@@ -37,14 +37,14 @@
   function ensureImages() {
     if (images) return;
     images = {};
-    for (const key of ['plates', 'player']) {
+    for (const key of ['plates', 'partner']) {
       const image = new Image();
       images[key] = image;
       image.onload = image.onerror = () => {
         for (const [canvas, snapshot] of loading) draw(canvas, snapshot);
         if (Object.values(images).every(img => img.complete)) loading.clear();
       };
-      image.src = 'art/stage-' + key + '.png';
+      image.src = key==='partner' ? 'art/partner-parts.png' : 'art/stage-plates.png';
     }
   }
   function background(c, plate) {
@@ -111,30 +111,82 @@
     return { shoulder, elbow, hand, tracked:Boolean(w) };
   }
   function forearm(c, elbow, hand) {
-    line(c, elbow, hand, 6, INK);
-    line(c, elbow, hand, 4, '#88dba7');
-    rect(c, elbow.x - 2, elbow.y - 2, 5, 5, '#526e7a');
-    rect(c, elbow.x - 1, elbow.y - 1, 2, 2, '#adc8ad');
-    rect(c, hand.x - 4, hand.y - 3, 8, 6, INK);
-    rect(c, hand.x - 3, hand.y - 4, 5, 8, INK);
-    rect(c, hand.x - 3, hand.y - 2, 6, 4, '#73c4a3');
-    rect(c, hand.x - 2, hand.y - 3, 3, 3, '#c4ecae');
+    line(c,elbow,hand,6,'#42142b');
+    line(c,elbow,hand,3,'#b5ce8b');
+    rect(c,elbow.x-2,elbow.y-2,4,4,'#659975');
+    part(c,5,hand.x-24,hand.y-24);
   }
   function arm(c, { shoulder, elbow, hand }) {
-    line(c, shoulder, elbow, 7, INK);
-    line(c, shoulder, elbow, 4, '#438c8b');
-    forearm(c, elbow, hand);
+    line(c,shoulder,elbow,7,'#42142b');
+    line(c,shoulder,elbow,4,'#83ad79');
+    forearm(c,elbow,hand);
+  }
+  function leg(c, hip, knee, foot, near) {
+    const ankle={x:foot.x,y:foot.y-5};
+    line(c,hip,knee,8,'#42142b'); line(c,knee,ankle,7,'#42142b');
+    line(c,hip,knee,5,near?'#83ad79':'#609575');
+    line(c,knee,ankle,4,near?'#609575':'#395c51');
+    rect(c,knee.x-3,knee.y-2,7,4,near?'#b5ce8b':'#83ad79');
+    c.save();
+    c.translate(round(foot.x),round(foot.y));
+    if(!near) c.scale(-1,1);
+    part(c,4,-25,-30);
+    c.restore();
+  }
+  function part(c, index, x, y, width=48, height=48) {
+    const art=images.partner;
+    if (art?.complete && art.naturalWidth) {
+      c.drawImage(art,index*48,0,48,48,round(x),round(y),width,height);
+    } else if(index<2 || index>=6) {
+      rect(c,x+3,y+16,40,27,'#568b72'); rect(c,x+7,y+19,32,21,'#173624');
+      rect(c,x+13,y+24,5,8,'#ffedb2'); rect(c,x+27,y+25,5,8,'#ffedb2');
+      rect(c,x+33,y+8,3,9,'#83ad79'); rect(c,x+34,y+4,6,6,GOLD);
+    } else if(index===4) {
+      rect(c,x+18,y+23,14,7,'#d75e1d');
+    } else if(index===5) {
+      rect(c,x+20,y+19,8,8,'#ffdf9b');
+    } else {
+      rect(c,x+10,y+10,24,16,'#a8c38a');rect(c,x+10,y+8,25,4,'#ed5225');
+    }
   }
   function player(c, pose, at, action, visual, time, scale, celebrate) {
-    const size = scale * (action === 'piano' ? 1.43 : 1.5);
-    const bob = !pose.points.length ? round(Math.sin(time * 1.7)) : 0;
+    const size = scale * (action === 'piano' ? 1.23 : 1.32);
+    const onBoard=action==='lean'||action==='flap';
+    const steering=clamp(number(visual.avatar_dx)/58,-1,1);
+    const freeArms=[limbs(pose,0,0),limbs(pose,1,celebrate?1.8:.45)];
+    const stroke=clamp((freeArms[0].hand.y-freeArms[0].shoulder.y+18)/40,0,1);
+    const pressure=action==='lean' ? Math.abs(steering) : stroke;
+    const faceVisible=Boolean(point(pose.points,0));
+    const turn=action==='turn'&&faceVisible ? clamp(number(visual.head_turn,pose.yaw/.17),-1,1) : 0;
+    const dip=action==='nod'&&faceVisible ? clamp(number(visual.head_dip,pose.nod/2),0,1) : 0;
+    const airborne=action==='hands_up' ? clamp(-number(visual.avatar_dy)/45,0,1) : 0;
+    const breath=pose.points.length ? 0 : Math.sin(time*2)*.75;
+    const hip={x:onBoard?48+5*steering:52,y:onBoard?63+5*pressure:65+2*dip-5*airborne+breath};
+    const neck={x:hip.x+(onBoard?13:2*turn),y:hip.y-(onBoard?15:23)};
     c.save();
-    c.translate(round(at.x), round(at.y+bob));
-    c.scale(size, size);
-    if (action==='lean') c.rotate(clamp(number(visual.avatar_dx)/58,-1,1)*.19);
-    c.translate(-38,-70);
-    const idleLift = celebrate ? 1.8 : .45;
-    const arms = [limbs(pose, 0, 0), limbs(pose, 1, idleLift)];
+    c.translate(round(at.x),round(at.y));
+    c.scale(size,size); c.translate(-52,-83);
+    const arms=freeArms.map((limb,i)=>{
+      const x=onBoard?hip.x+(i?15:3):hip.x+(i?11:-11);
+      const y=hip.y+(onBoard?(i?-14:-11):-17)+pose.tilt*(i?1:-1);
+      const dx=x-limb.shoulder.x,dy=y-limb.shoulder.y;
+      const offset=p=>({x:p.x+dx,y:p.y+dy});
+      return {shoulder:offset(limb.shoulder),elbow:offset(limb.elbow),hand:offset(limb.hand),tracked:limb.tracked};
+    });
+    const feet=onBoard?[[32,83],[64,81]]:[[41-5*airborne,83-7*airborne],[63+2*airborne,83-15*airborne]];
+    const knees=onBoard?[[35-4*pressure,67+3*pressure],[65+3*pressure,66+4*pressure]]:
+      [[41-7*airborne,73-12*airborne],[61+8*airborne,72-18*airborne]];
+    for(let i=0;i<2;i++) leg(c,{x:hip.x+(i?5:-5),y:hip.y},{x:knees[i][0],y:knees[i][1]},
+      {x:feet[i][0],y:feet[i][1]},Boolean(i));
+    const tail=onBoard ? Math.sin(time*7)*2-2 : 0;
+    c.save();
+    c.translate(round(neck.x+(onBoard?-5:9)),round(neck.y+(onBoard?-3:4)));
+    if(onBoard) c.scale(-1,1);
+    path(c,[[0,0],[5,1],[13,-2+tail],[21,-3+tail],[23,-1+tail],[20,2+tail],
+      [21,5+tail],[14,4+tail],[9,6],[14,9+tail],[8,11+tail],[2,8],[-2,5]],'#42142b');
+    path(c,[[1,2],[6,2],[14,-1+tail],[21,-1+tail],[18,2+tail],[19,3+tail],[14,2+tail],[8,5],[2,4]],'#f05325');
+    path(c,[[1,5],[5,5],[12,7+tail],[13,9+tail],[8,9+tail],[7,10+tail],[3,8]],'#ca3823');
+    c.restore();
     if (action==='flap') {
       for (const {shoulder,hand,tracked} of arms) {
         const dx=hand.x-shoulder.x, dy=hand.y-shoulder.y;
@@ -147,33 +199,19 @@
         }
       }
     }
-    for (const limb of arms) arm(c, limb);
-    const sprite = images.player;
-    const ready=Boolean(sprite?.complete && sprite.naturalWidth);
-    if (ready) c.drawImage(sprite,78,0,78,78,0,0,78,78);
-    else {
-      rect(c, 26, 44, 25, 20, INK); rect(c, 28, 46, 21, 15, MINT);
-      rect(c, 23, 65, 11, 5, INK); rect(c, 40, 65, 11, 5, INK);
-    }
-    // Keep the neck in place while the CRT turns into profile or pitches down.
-    const faceVisible=Boolean(point(pose.points,0));
-    const turn=action==='turn' && faceVisible ? clamp(number(visual.head_turn,pose.yaw/.17),-1,1) : 0;
-    const dip=action==='nod' && faceVisible ? clamp(number(visual.head_dip,pose.nod/2),0,1) : 0;
+    arm(c,arms[0]);
+    part(c,onBoard?3:2,hip.x-(onBoard?20:23),hip.y-(onBoard?26:27));
+    const profile=onBoard||Math.abs(turn)>.42;
     c.save();
-    const headX=round(pose.yaw*4+turn*7);
-    c.translate(38+headX,48+(dip ? round(dip*3) : round(pose.nod)));
-    c.scale((turn>.40?-1:1)*(1-Math.abs(turn)*.30),1-dip*.27);
-    c.translate(-38,-48);
-    if (ready) c.drawImage(sprite,0,0,78,78,0,0,78,78);
-    else {
-      rect(c,16,17,44,32,INK); rect(c,18,19,40,28,MINT);
-      rect(c,21,23,32,19,INK); rect(c,26,28,4,7,MINT); rect(c,41,28,4,7,MINT);
-      rect(c,40,10,3,8,MINT); rect(c,39,7,6,5,CORAL);
-    }
+    c.translate(round(neck.x+pose.yaw*3+4*turn),round(neck.y+6*dip));
+    if (turn<-.42) c.scale(-1,1);
+    const blink=action==='wave' && time%3.5>3.35;
+    part(c,(blink?6:0)+(profile?1:0),onBoard?-22:-24,onBoard?-43:-42,48,round(48-7*dip));
     c.restore();
+    arm(c,arms[1]);
     for (const {elbow,hand,shoulder,tracked} of arms) {
       // A raised forearm should remain visible when it crosses the CRT.
-      if (tracked && hand.x>15 && hand.x<62 && hand.y<53) forearm(c,elbow,hand);
+      if (tracked && hand.x>neck.x-20 && hand.x<neck.x+21 && hand.y<neck.y) forearm(c,elbow,hand);
       if (action==='wave' && tracked && hand.y<shoulder.y) {
         rect(c,hand.x-2,hand.y-6,4,2,GOLD);
         rect(c,hand.x-5,hand.y-4,2,2,'#fbe4ac');
@@ -367,9 +405,12 @@
     rect(c,at.x-shadowWidth*.35,FLOOR+4,shadowWidth*.7,1,'#575362');
     player(c,pose,at,action,visual,time,1,summary||clear);
     if(action==='piano') keyboard(c,visual,progress,pose.points,challenge.tracking!==false);
-    if(action==='lean'){
-      rect(c,at.x-30,at.y+4,30,2,'#d77d7a');rect(c,at.x+3,at.y+3,29,2,'#c57377');
-      rect(c,at.x+30,at.y+1,4,2,'#d77d7a');
+    if(action==='lean'||action==='flap'){
+      const x=at.x,y=at.y;
+      path(c,[[x-43,y-3],[x-33,y+1],[x+25,y-1],[x+42,y-7],[x+36,y],
+        [x+27,y+3],[x-34,y+5],[x-44,y]],INK);
+      path(c,[[x-40,y-2],[x-32,y],[x+25,y-2],[x+40,y-6],[x+33,y-1],
+        [x+25,y+1],[x-33,y+3]],action==='lean'?'#df8876':'#ffbd74');
     }
     if (clear || (summary && snapshot.cleared > 0)) confetti(c,time);
     if (snapshot.phase==='alert') {
