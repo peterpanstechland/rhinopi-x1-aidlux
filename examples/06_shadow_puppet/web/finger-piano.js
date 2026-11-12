@@ -3,6 +3,8 @@
   "use strict";
   const names = ["小指","无名指","中指","食指","拇指","拇指","食指","中指","无名指","小指"];
   const tips = [20,16,12,8,4,4,8,12,16,20];
+  const notes = ["C4","D4","E4","F4","G4","A4","B4","C5","D5","E5"];
+  const phrase = Object.freeze([2,7,3,6,1,8,4,5]);
   const chains = [[0,1,2,3,4],[0,5,6,7,8],[5,9,13,17,0],[9,10,11,12],[13,14,15,16],[17,18,19,20]];
   const sideName = side => side ? "右手" : "左手";
   const label = key => sideName(Number(key>=5)) + names[key];
@@ -51,5 +53,5 @@
       return {depths,press:presses.sort((a,b)=>b.amount-a.amount)[0]?.key};
     }
   }
-  window.FingerPiano=Object.freeze({names,tips,chains,label,sideName,locate,Tracker});
+  window.FingerPiano=Object.freeze({names,tips,notes,phrase,chains,label,sideName,locate,Tracker});
 })();

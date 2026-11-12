@@ -34,6 +34,16 @@
 #view-board #guide-picker button[aria-pressed=true] {background:#c5ebbc;color:#223b30;border-color:#dcf6cc;box-shadow:0 2px 0 #6a9176}
 #view-board #guide-picker button:hover:not(:disabled) {border-color:#e3cfb1}
 #view-board .board-details summary {min-height:32px;padding:4px}
+#view-board.piano-room .live-display {background:#22313b;border:1px solid #53616a;box-shadow:0 5px 18px #0b111730}
+#view-board.piano-room .stage-toolbar {background:#26333e}
+#view-board.piano-room .stage-views button[aria-pressed=true] {background:#e4cd9f;color:#302d34}
+#view-board.piano-room .telemetry {color:#ede0c7;background:#2c333b;border:1px solid #67615a;box-shadow:0 4px 14px #11151b30}
+#view-board.piano-room .telemetry h2,#view-board.piano-room .metric strong {color:#fff0d6}
+#view-board.piano-room .telemetry p {color:#e1d8cd}
+#view-board.piano-room .telemetry .eyebrow,#view-board.piano-room .metric {color:#d5bd92}
+#view-board.piano-room .telemetry .button {background:#37414a;color:#f3e5ce;border:1px solid #78746c;box-shadow:none}
+#view-board.piano-room .telemetry .button.primary {background:#ebcc95;color:#342c29}
+#view-board.piano-room #motion-canvas,#view-board.piano-room #coach-canvas {image-rendering:auto}
 @media(max-width:850px) {
   #view-board .live-grid {grid-template-columns:1fr;gap:12px}
   #view-board .telemetry {padding:15px}

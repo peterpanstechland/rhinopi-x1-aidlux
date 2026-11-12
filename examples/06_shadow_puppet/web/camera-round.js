@@ -13,7 +13,7 @@
   ];
   const actById = new Map(acts.map(act => [act.id,act]));
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const keys = [2,7,3,6,1,8,4,5];
+  const keys = window.FingerPiano.phrase;
   const sides = [-1,1,1,-1,1,-1];
 
   class CameraRound {

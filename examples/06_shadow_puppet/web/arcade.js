@@ -78,7 +78,7 @@
       card.className="cart "+game.id;
       card.dataset.game=game.id;
       card.tabIndex=game.id===activeCartridge ? 0 : -1;
-      const control = deckMotion ? move.goal : game.pads.map(([key]) => key==="Space" ? "空格" : key).join(" / ");
+      const control = deckMotion ? move.goal : game.id==="synth" ? "1–0 · 十键" : game.pads.map(([key]) => key==="Space" ? "空格" : key).join(" / ");
       card.setAttribute("aria-label", game.title+" · "+(deckMotion?"摄像头体感":"键盘 / 触屏")+" · "+control);
       const art=textElement("span","","cart-art");
       const img=new Image(); img.alt=""; img.src="art/"+game.art+".png";
@@ -186,7 +186,7 @@
   const cameraInfo = $("camera-info");
   let cameraFailed = false;
   const cameraHint = "画面只在本机处理。把设备摆稳，让上半身入镜。";
-  const framing = {wings:"双肩和两只手腕",flap:"双肩和两只手腕",piano:"双肩和两只手腕",wave:"双肩和挥动的手腕",lean:"脸和双肩",turn:"脸和双肩",nod:"脸和双肩",hands_up:"双肩"};
+  const framing = {wings:"双肩和两只手腕",flap:"双肩和两只手腕",piano:"双手和指尖",wave:"双肩和挥动的手腕",lean:"脸和双肩",turn:"脸和双肩",nod:"脸和双肩",hands_up:"双肩"};
   function setStageText(id, value) {
     const el = $(id);
     if (el.textContent !== value) el.textContent = value;
@@ -269,6 +269,7 @@
   }
   function renderPreview() {
     const action = coach.actions.find(a => a.id === guideId);
+    $("view-board").classList.toggle("piano-room",guideId==="piano");
     $("phase").textContent = singleMove ? moves.get(singleMove).title : "八关连闯";
     $("round-label").textContent = singleMove ? "单关挑战 · " + action.region : "体感挑战 · 8 关";
     const cue=action.cue;
@@ -278,12 +279,12 @@
     $("practice-keys").hidden = Boolean(cameraRequest);
     cameraInfo.hidden = false;
     $("practice-keys").classList.toggle("primary", !cameraSupported || cameraFailed);
-    $("practice-label").textContent = "用键盘 / 触屏玩「" + moves.get(guideId).title + "」";
+    $("practice-label").textContent = guideId==="piano" ? "用键盘 / 触屏试弹十键" : "用键盘 / 触屏玩「" + moves.get(guideId).title + "」";
     if (!cameraSupported) cameraInfo.textContent = "这里可以看动作示范、用按键闯关。摄像头体感可从 HTTPS 或本机 localhost 开启。";
     $("round-metrics").hidden = true;
     $("guide-library").hidden = false;
     $("board-summary").hidden = Boolean(cameraRequest) || !latestBoardResult;
-    $("stage-heading").textContent = "动作预演";
+    $("stage-heading").textContent = guideId==="piano" ? "指法预演" : "动作预演";
     $("stage-source").textContent = moves.get(guideId).title;
     stagePrompt(action.goal, (guideId==="piano"?"指法示范":"小电示范中")+" · 不计分", "preview");
     $("tracking-caption").closest(".stage-caption").classList.remove("tracking");
@@ -437,6 +438,7 @@
     const online = Boolean(s);
     const local=s?.source==="camera";
     const challenge = s?.challenge || {};
+    $("view-board").classList.toggle("piano-room",s?.act_id==="piano" && s.phase==="round");
     $("round-metrics").hidden=false;
     $("guide-library").hidden=!(local && s?.phase==="summary");
     $("stage-heading").textContent="玩家舞台";
@@ -469,7 +471,7 @@
     const tracked = fingerMode ? challenge.tracking : Boolean(s?.pose_points?.[11] && s?.pose_points?.[12]);
     const missing = playing && s.sub !== "clear" && challenge.tracking === false;
     const status = !s ? "正在接入追踪…" : s.phase === "summary" ? "本轮已结束" : s.camera_online === false ? "摄像头离线" : missing ? (local ? "等待入镜 · 计时暂停" : "等待入镜") : tracked ? (fingerMode?"手部骨骼已识别":"上半身已追踪") : "等待玩家入镜";
-    const instruction = missing ? (fingerMode ? challenge.cue : "让" + (framing[s.act_id] || "上半身") + "进入画面") :
+    const instruction = missing ? (fingerMode ? challenge.cue : "让" + (pianoInput==="wrists" ? "双肩和手腕" : framing[s.act_id] || "上半身") + "进入画面") :
       playing ? challenge.cue || challenge.text || s.act_goal || "跟小电做动作" :
       s?.phase === "summary" ? "完成 " + s.cleared + " / " + s.round_len + " 关" : tip;
     stagePrompt(instruction, status, missing ? "waiting" : playing ? "playing" : "idle", playing ? challenge : null);

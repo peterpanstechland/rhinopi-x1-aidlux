@@ -11,7 +11,7 @@
     {id:'flap', name:'老鹰', cue:'把双臂伸向两侧，像扇翅膀一样同时抬起、落下。', goal:'扇动 8 次', region:'双臂'},
     {id:'wave', name:'挥手', cue:'抬一只手到肩膀上方，在脸旁左右摆动手腕。', goal:'挥手送走 10 人', region:'单手'},
     {id:'lean', name:'滑雪', cue:'面对屏幕，把头和上身偏向旗子一侧，避开树。', goal:'碰到 6 面旗', region:'头和上身'},
-    {id:'piano', name:'弹琴', cue:'掌心朝向镜头，两手各放一侧。只弯黄键点名的那根手指，再伸直。', goal:'跟着指法弹出 8 个音', region:'十指'},
+    {id:'piano', name:'弹琴', cue:'一根手指对应一个琴键。掌心朝镜头，轻弯金色指尖对应的手指，伸直就松键。', goal:'跟着金色指尖弹出 8 个音', region:'十指'},
     {id:'hands_up', name:'跳跃', cue:'仙人掌靠近时，坐着让双肩随上身快速上提一次，再放松落回。', goal:'越过 5 个仙人掌', region:'双肩和上身'},
     {id:'turn', name:'转头', cue:'保持双肩朝前，转脸看向一侧，回正后再转向另一侧。', goal:'左右各转 3 次', region:'头部'},
     {id:'nod', name:'点头', cue:'双肩保持原位，低一下头，再抬起看正前方。', goal:'完成 6 次点头', region:'头部'}
@@ -39,7 +39,7 @@
       ['向右倾', .95, pose([57,67,57,67], {lean:1})], ['身体回正', .6, neutral]
     ],
     piano:[
-      ['张开手指', .85, neutral], ['轻弯亮起的手指', .55, pose(calm, {press:1})], ['伸直松键', .65, neutral]
+      ['张开五指', .85, neutral], ['轻弯指尖', .55, pose(calm, {press:1})], ['伸直松键', .65, neutral]
     ],
     hands_up:[
       ['坐稳', .95, neutral], ['双肩上提', .42, pose([72,63,72,63], {lift:1})], ['落回座位', .8, neutral]
@@ -260,13 +260,13 @@
     const wrist=id==='piano' && (input==='wrists' || input==='wrist');
     if(id==='piano') {
       const target=snapshot?.challenge?.visual?.target_key;
-      const demoKeys=[2,7,3,6,1,8,4,5];
+      const demoKeys=window.FingerPiano.phrase;
       const note=Number.isInteger(target)&&target>=0&&target<10?target:demoKeys[f.loops%demoKeys.length];
       if (wrist) wristKeyboard(c,f,note);
       else {
         const depth=Array(10).fill(0);depth[note]=f.sample.press;
-        const hand_points=[0,1].map(side=>window.PianoStage.demoHand(side,depth));
-        window.PianoStage.draw(c,W,125,{target_key:note,hand_points,keys_lit:depth[note]>.6?[note]:[]},{demo:true,aspect:16/9});
+        window.PianoStage.draw(c,W,H,{target_key:note,finger_depth:depth,keys_lit:depth[note]>.6?[note]:[]},{demo:true,cue:f.label});
+        return;
       }
     } else {
       c.save();

@@ -3,8 +3,28 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 global.window = {};
 require("./web/finger-piano.js");
+require("./web/piano-stage.js");
 require("./web/camera-round.js");
 const {CameraRound} = window;
+
+test("ten finger demonstrations rotate fixed-length bones and keep the palm and idle digits still", () => {
+  const length=(a,b,projected)=>Math.hypot((a[0]-b[0])*230,(a[1]-b[1])*130,projected?0:(a[2]-b[2])*130);
+  for(const [key,tip] of window.FingerPiano.tips.entries()) {
+    const side=Number(key>=5), rest=window.PianoStage.demoHand(side,[]);
+    for(let n=0;n<=20;n++) {
+      const depths=Array(10).fill(0);depths[key]=n/20;
+      const frame=window.PianoStage.demoHand(side,depths);
+      frame.forEach((p,i)=>{
+        if(i<=tip-3 || i>tip) return assert.deepEqual(p,rest[i]);
+        const original=length(rest[i-1],rest[i]);
+        assert.ok(Math.abs(length(frame[i-1],p)-original)<1e-9);
+        assert.ok(length(frame[i-1],p,true)<=original+1e-9);
+      });
+      if(n===20) assert.ok(frame[tip][2]>0);
+    }
+    assert.equal(window.PianoStage.keyAt(33+key*35+(side?3:0),170),key);
+  }
+});
 
 // Joint offsets are measured in shoulder widths relative to the shoulder midpoint.
 function handsFrame(pressed) {

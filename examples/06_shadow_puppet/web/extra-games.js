@@ -138,11 +138,11 @@
   const aspect = 16 / 9;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)");
   function newAvatar() {
-    return {arms:restingArms.slice(), lean:0, lift:0, yaw:0, dip:0, keyboardX:0, stage:null};
+    return {arms:restingArms.slice(), lean:0, lift:0, yaw:0, dip:0, stage:null};
   }
   function poseTarget(s) {
     const e = s.extra;
-    const target = {arms:restingArms, lean:0, lift:0, yaw:0, dip:0, keyboardX:0};
+    const target = {arms:restingArms, lean:0, lift:0, yaw:0, dip:0};
     const sincePress = s.elapsed - s.pressAt;
     switch (s.moveId) {
       case "wings":
@@ -159,16 +159,6 @@
         target.lean = Math.max(-1,Math.min(1,(s.lane-s.laneDraw)*3));
         target.arms = [54,68,54,68];
         break;
-      case "piano": {
-        const pressed = s.lastKey >= 0 && sincePress < .22;
-        const key = pressed ? s.lastKey : s.notes[s.hits] ?? s.lastKey;
-        const left = key < 2;
-        const arm = pressed ? [26,62] : [-9,27];
-        target.arms = left ? [...arm,68,76] : [68,76,...arm];
-        // Place the playing hand over the corresponding A/S/D/F key.
-        target.keyboardX = 65 + 62 * key + (left ? 29 : -29);
-        break;
-      }
       case "hands_up":
         target.lift = jumpHeight(s)/51;
         target.arms = [69,77-25*target.lift,69,77-25*target.lift];
@@ -182,7 +172,7 @@
     const a = s.avatar, target = poseTarget(s);
     const blend = reduced?.matches || dt===null ? 1 : 1-Math.exp(-dt*22);
     for (let i=0;i<4;i++) a.arms[i] += (target.arms[i]-a.arms[i])*blend;
-    for (const key of ["lean","lift","yaw","dip","keyboardX"]) {
+    for (const key of ["lean","lift","yaw","dip"]) {
       a[key] += (target[key]-a[key])*blend;
     }
   }

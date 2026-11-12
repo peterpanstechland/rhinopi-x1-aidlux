@@ -449,22 +449,27 @@
   function draw(canvas, snapshot) {
     const c = canvas.getContext('2d');
     if (!c) return;
-    if (canvas.width!==W) canvas.width=W;
-    if (canvas.height!==H) canvas.height=H;
-    c.imageSmoothingEnabled=false;
     const roundActive=snapshot.phase==='round';
     const action=roundActive ? snapshot.act_id : '';
     const challenge=roundActive ? (snapshot.challenge || {}) : {};
     const visual=challenge.visual || {}, progress=clamp(number(challenge.frac),0,1);
     const pose=poseInfo(snapshot), time=reducedMotion?.matches ? 0 : performance.now()/1000;
     const summary=snapshot.phase==='summary', clear=roundActive && snapshot.sub==='clear' && progress>=1;
-    const at={x:CENTER, y:FLOOR};
-    scenery(c,action);
-    if (action==='piano' && (challenge.piano_input || visual.piano_input)==='fingers' && visual.hand_points) {
+    const pianoInput=challenge.piano_input || visual.piano_input || (visual.aim_keys ? 'wrists' : 'fingers');
+    const fingerView=action==='piano' && !['wrists','wrist'].includes(pianoInput);
+    const resolution=fingerView ? 2 : 1;
+    if (canvas.width!==W*resolution) canvas.width=W*resolution;
+    if (canvas.height!==H*resolution) canvas.height=H*resolution;
+    c.imageSmoothingEnabled=false;
+    if (fingerView) {
+      c.save();c.scale(resolution,resolution);
       window.PianoStage.draw(c,W,H,visual,{aspect:snapshot.pose_aspect || 1,count:challenge.count,ready:snapshot.sub==='ready'});
       if(clear) confetti(c,time);
+      c.restore();
       return;
     }
+    const at={x:CENTER, y:FLOOR};
+    scenery(c,action);
     if(action==='lean') {
       at.x+=clamp(number(visual.avatar_dx, pose.yaw*56),-65,65)*1.65;
       slalom(c,visual);

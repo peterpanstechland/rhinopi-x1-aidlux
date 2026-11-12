@@ -3,6 +3,7 @@
   "use strict";
 
   const extra = window.ExtraCartridges;
+  const piano = window.FingerPiano;
   const games = {
     rooftop: {
       title: "天台展翅", short: "ROOFTOP", mark: "01", art: "rooftop",
@@ -22,8 +23,8 @@
       title: "落日合奏", short: "SUNSET SYNTH", mark: "05", art: "synth",
       color: "#ffb29b", target: 8, limit: 25, unit: "音符",
       brief: "跟着亮起的琴键，用八个音符完成落日旋律。",
-      hint: "按亮起的 A、S、D、F，或点击对应琴键。按错仍可弹回当前音。",
-      pads: [["A", "哆"], ["S", "咪"], ["D", "索"], ["F", "高哆"]],
+      hint: "从左到右用数字 1 到 0 弹十个音。也可以直接点琴键，跟着金色音符弹。",
+      pads: piano.names.map((_,i)=>["1234567890"[i],piano.label(i)]),
     },
     ...extra.games,
   };
@@ -290,7 +291,7 @@
       id, moveId, config, avatar: extra.newAvatar(), pressAt: -10, phase: "brief", elapsed: 0, countdown: 0, last: 0, hits: 0,
       score: 0, combo: 0, flash: 0, good: true, cooldown: 0, cursor: .13, practice: false,
       zone: .64, lane: 1, laneDraw: 1, gate: 0, gateTime: 0, lastKey: -1,
-      gateLanes: [0, 2, 1, 0, 1, 2], notes: [0, 1, 2, 1, 3, 2, 1, 0],
+      gateLanes: [0, 2, 1, 0, 1, 2], notes: piano.phrase,
     };
     if (Object.hasOwn(extra.games,id)) session.extra = extra.init();
     extra.animate(session,null);
@@ -304,9 +305,9 @@
     pauseButton.setAttribute("aria-keyshortcuts","P");
     actions.prepend(pauseButton);
     const stage = el("div", "dp-stage");
-    const canvas = el("canvas", "dp-canvas");
-    canvas.width = W;
-    canvas.height = H;
+    const canvas = el("canvas", id==="synth" ? "dp-canvas dp-piano-canvas" : "dp-canvas");
+    canvas.width = id==="synth" ? 768 : W;
+    canvas.height = id==="synth" ? 420 : H;
     canvas.setAttribute("aria-label", config.title + "小游戏画面");
     canvas.tabIndex = -1;
     const counts = el("div", "dp-counts");
@@ -327,13 +328,15 @@
     const fill = el("i");
     meter.append(fill);
     const pads = el("div", "dp-pad-row");
+    if (id==="synth") pads.classList.add("dp-piano-pads");
     const controls = config.pads.map(([hotkey, label], index) => {
       const pad = el("button", "dp-pad");
       pad.type="button";
       // Keyboard activation and assistive technology issue a click without a pointer.
       pad.addEventListener("click",event=>{if(event.detail===0) input(index);});
       pad.addEventListener("animationend",()=>pad.classList.remove("dp-pressed"));
-      pad.append(el("kbd", "", hotkey==="Space" ? "空格" : hotkey), el("span","",label));
+      if(id==="synth") pad.setAttribute("aria-label",label+" · "+hotkey);
+      pad.append(el("kbd", "", hotkey==="Space" ? "空格" : hotkey), el("span","",id==="synth"?piano.names[index]:label));
       pads.append(pad);
       return pad;
     });
@@ -354,13 +357,13 @@
       const bounds = canvas.getBoundingClientRect();
       const x = (event.clientX - bounds.left) / bounds.width;
       const y = (event.clientY - bounds.top) / bounds.height * H;
-      if (x<0 || x>=1 || y<0 || y>H || (id==="synth" && (y<73 || y>114))) {
+      if (x<0 || x>=1 || y<0 || y>H) {
         contacts.set(event.pointerId,-1);
         return;
       }
       let index = 0;
       if (session.extra || id==="alpine") index = Math.min(controls.length-1, Math.floor(x * controls.length));
-      if (id==="synth") index = Math.floor((x * W - 36) / 62);
+      if (id==="synth") index = window.PianoStage.keyAt(x*384,y/H*210);
       if (index >= 0 && index < controls.length && contacts.get(event.pointerId)!==index) input(index);
       contacts.set(event.pointerId,index);
     }
@@ -490,7 +493,10 @@
       if (keyName === "arrowright") index = Math.min(2, session.lane + 1);
       if (["1","2","3"].includes(keyName)) index = Number(keyName) - 1;
     }
-    if (session.id === "synth") index = ["a","s","d","f"].indexOf(keyName);
+    if (session.id === "synth") {
+      index = [..."1234567890"].indexOf(keyName);
+      if (index<0) index=[..."asdfghjkl;"].indexOf(keyName);
+    }
     if (session.extra) {
       index=session.config.keys.indexOf(keyName);
     }
@@ -511,7 +517,10 @@
       s.hits++;
       s.score += points + Math.min(5, s.combo - 1) * 10;
     }
-    if (success && s.id === "synth") window.DeskAudio?.note(s.lastKey);
+    if (s.id === "synth") {
+      window.DeskAudio?.note(s.lastKey,true);
+      if(!success) window.DeskAudio?.cue("miss");
+    }
     else window.DeskAudio?.cue(success ? "hit" : "miss");
     refs.feedback.dataset.kind=success ? "hit" : "miss";
     tell(success && !s.practice ? message + "　+" + (points+Math.min(5,s.combo-1)*10) : message);
@@ -624,8 +633,9 @@
     if (r.clock.textContent !== timeText) r.clock.textContent = timeText;
     if (r.points.textContent !== scoreText) r.points.textContent = scoreText;
     if (!s.flash) tell("");
+    const nextNote=s.notes[s.hits] ?? s.notes.at(-1);
     const target = s.extra ? extra.objective(s) : s.id === "alpine" ? "第 " + (s.gate + 1) + " 旗 · " + lanes[s.gateLanes[s.gate]]
-      : s.id === "synth" ? "下一个音 · " + s.config.pads[s.notes[s.hits]][0] : "抓住绿色节拍区";
+      : s.id === "synth" ? piano.label(nextNote) + " · 按 " + s.config.pads[nextNote][0] : "抓住绿色节拍区";
     const label = enabled ? target : s.practice ? s.config.brief : "挑战目标 · " + s.config.target + " " + s.config.unit;
     if (r.objective.textContent !== label) r.objective.textContent = label;
     const goalCount=s.practice ? 1 : s.config.target;
@@ -779,45 +789,18 @@
     if(s.flash>.1 && s.good) star(ctx,playerX+18,72,"#fff4bc",2);
   }
   function synth(ctx,s) {
-    box(ctx,"#422e44",0,79,W,47);
-    box(ctx,"#f0a993",0,79,W,2);
-    window.MotionStage.paintAvatar(ctx,extra.snapshot(s),s.avatar.keyboardX,78,.64);
-    const current=s.notes[s.hits];
-    // A four-step phrase preview scrolls across the sequencer.
-    for(let i=0;i<4;i++) {
-      const note=s.notes[s.hits+i];
-      const x=103+i*28;
-      box(ctx,i===0?"#ffe0a9":"#8b737f",x,6,22,18);
-      box(ctx,i===0?"#435246":"#3c3449",x+1,7,20,16);
-      if(note!==undefined) {
-        ctx.fillStyle=i===0?"#d2ffb7":"#f2cdb8";
-        ctx.font="bold 12px monospace";
-        ctx.textAlign="center";
-        ctx.fillText("ASDF"[note],x+11,19);
-      }
-    }
-    for(let i=0;i<4;i++) {
-      const x=36+i*62, active=i===current, down=s.lastKey===i && s.elapsed-s.pressAt<.22;
-      box(ctx,"#24283b",x,73,60,41);
-      box(ctx,down?"#ffb77d":active?"#baffad":"#d2bac2",x+2,75+Number(down)*2,56,33);
-      box(ctx,active?"#649474":"#987f95",x+2,107,56,4);
-      if(i!==3) box(ctx,"#383146",x+47,74,17,12);
-      ctx.fillStyle="#3d414a";
-      ctx.font="bold 14px monospace";
-      ctx.textAlign="center";
-      ctx.fillText("ASDF"[i],x+29,99);
-      if(active) star(ctx,x+29,81,"#546b57",2);
-      if(down) {
-        box(ctx,"#344653",x+25,74,8,3);
-        box(ctx,"#bdf2aa",x+26,73,6,3);
-      }
-    }
+    const age=s.elapsed-s.pressAt, depths=Array(10).fill(0);
+    if(s.lastKey>=0 && age<.32) depths[s.lastKey]=Math.max(0,Math.min(1,(.32-age)/.16));
+    const target=s.notes[s.hits] ?? s.notes.at(-1);
+    window.PianoStage.draw(ctx,W,H,{target_key:target,finger_depth:depths,
+      keys_lit:depths[s.lastKey]>.5?[s.lastKey]:[]},{manual:true,count:s.hits});
   }
   function paint() {
     const s = session;
     const ctx = refs?.ctx;
     if (!s || !ctx) return;
     ctx.save();
+    if(s.id==="synth")ctx.scale(ctx.canvas.width/W,ctx.canvas.height/H);
     ctx.imageSmoothingEnabled = false;
     if (s.phase==="brief") background(ctx,s.id,true);
     else if (s.extra) extra.draw(ctx,s);

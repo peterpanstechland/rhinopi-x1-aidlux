@@ -147,6 +147,10 @@
 .dp-console .dp-pad.dp-pressed {animation:dp-press .16s ease-out}
 @keyframes dp-press {0%,55% {background:#ffc58c;transform:translateY(2px)}}
 .dp-console button:focus-visible {outline-color:#c68a42}
+.dp-console .dp-piano-pads {grid-template-columns:repeat(5,minmax(0,1fr));grid-auto-flow:row;gap:5px}
+.dp-console .dp-piano-pads .dp-pad {min-height:44px;gap:3px;font-size:12px}
+.dp-console .dp-piano-canvas {aspect-ratio:384/210;image-rendering:auto}
+.dp-console .dp-piano-pads .dp-pad:nth-child(n+6) kbd {background:#e7e2ed;color:#544b67}
 .dp-console .dp-commands {margin-top:16px;display:flex;flex-wrap:wrap;align-items:center;gap:9px}
 .dp-console .dp-commands button {min-height:44px}
 .dp-console .dp-primary {background:#ffe099;color:#392a30;border:1px solid #ab845c;box-shadow:0 2px #a47b57}
