@@ -15,15 +15,15 @@
     alpine: {
       title: "雪岭穿梭", short: "ALPINE", mark: "04", art: "alpine",
       color: "#9ef3dc", target: 6, limit: 18, unit: "旗门",
-      brief: "提前切到旗门所在雪道，让小电穿过六面旗。",
-      hint: "用 ← → 换道，或点下方雪道。让小电站稳在下一面旗门所在的道上。",
+      brief: "看旗门换道，穿过第三面旗后雪道提速。",
+      hint: "用 ← → 或点雪道。提前对准旗门中心可多得 20 分。",
       pads: [["1", "左道"], ["2", "中道"], ["3", "右道"]],
     },
     synth: {
       title: "落日合奏", short: "SUNSET SYNTH", mark: "05", art: "synth",
       color: "#ffb29b", target: 8, limit: 25, unit: "音符",
       brief: "跟着亮起的琴键，用八个音符完成落日旋律。",
-      hint: "从左到右用数字 1 到 0 弹十个音。也可以直接点琴键，跟着金色音符弹。",
+      hint: "用数字 1 到 0 或点亮键。前两个音左右手交替，接着跟随本轮的同手连奏。",
       pads: piano.names.map((_,i)=>["1234567890"[i],piano.label(i)]),
     },
     ...extra.games,
@@ -426,6 +426,8 @@
     if (!session) return;
     if (session.practice) open(session.id);
     if (session.phase !== "brief") return;
+    if(session.id==="alpine")session.gateLanes=window.RoundPatterns.gates([0,1,2]);
+    if(session.id==="synth")session.notes=window.RoundPatterns.melody();
     window.DeskAudio?.cue("start");
     session.phase = "countdown";
     session.countdown = 3;
@@ -583,11 +585,13 @@
       if (s.id === "alpine") {
         s.laneDraw += (s.lane - s.laneDraw) * (1-Math.exp(-dt*8));
         s.gateTime += dt;
-        if (s.gateTime >= 2.85) {
-          const hit = s.lane === s.gateLanes[s.gate];
-          award(hit, 100, hit ? "穿过旗门！" : "错过旗门，瞄准下一旗");
+        const period=window.RoundPatterns.gatePeriod(2.85,s.hits);
+        if (s.gateTime >= period) {
+          const distance=Math.abs(s.laneDraw-s.gateLanes[s.gate]);
+          const hit=distance<.4, precise=distance<=.12;
+          award(hit, precise ? 120 : 100, hit ? (precise ? "精准过旗！" : "穿过旗门！") : "错过旗门，瞄准下一旗");
           s.gate++;
-          s.gateTime -= 2.85;
+          s.gateTime -= period;
           if (s.practice) {
             if (hit) return finish();
             s.gate%=s.gateLanes.length;
@@ -634,7 +638,7 @@
     if (r.points.textContent !== scoreText) r.points.textContent = scoreText;
     if (!s.flash) tell("");
     const nextNote=s.notes[s.hits] ?? s.notes.at(-1);
-    const target = s.extra ? extra.objective(s) : s.id === "alpine" ? "第 " + (s.gate + 1) + " 旗 · " + lanes[s.gateLanes[s.gate]]
+    const target = s.extra ? extra.objective(s) : s.id === "alpine" ? (s.hits>=3?"加速段 · ":"") + "第 " + (s.gate + 1) + " 旗 · " + lanes[s.gateLanes[s.gate]]
       : s.id === "synth" ? piano.label(nextNote) + " · 按 " + s.config.pads[nextNote][0] : "抓住绿色节拍区";
     const label = enabled ? target : s.practice ? s.config.brief : "挑战目标 · " + s.config.target + " " + s.config.unit;
     if (r.objective.textContent !== label) r.objective.textContent = label;
@@ -773,7 +777,7 @@
       poly(ctx,"#446e71",[[x,y-u*2.8],[x-u,y],[x+u,y]]);
       poly(ctx,"#92c3b6",[[x,y-u*2.8],[x-u*.65,y-u],[x+u*.55,y-u]]);
     }
-    const phase = Math.min(1,s.gateTime/2.85);
+    const phase = Math.min(1,s.gateTime/window.RoundPatterns.gatePeriod(2.85,s.hits));
     const depth = .08 + .92*phase*phase;
     const gate = s.gateLanes[s.gate] ?? 1;
     const x=laneX(gate,depth), y=horizon+depth*64;

@@ -10,19 +10,20 @@
   <link rel="preload" as="image" href="art/partner-parts.png">
   <link rel="preload" as="image" href="art/stage-plates.png">
   <link rel="stylesheet" href="arcade.css">
-  <link rel="stylesheet" href="motion-ui.css?v=recital-3">
+  <link rel="stylesheet" href="motion-ui.css?v=relay-1">
   <link rel="stylesheet" href="play.css?v=recital-3">
   <link rel="stylesheet" href="opening.css">
   <script defer src="soundtrack.js"></script>
+  <script defer src="round-patterns.js"></script>
   <script defer src="finger-piano.js?v=recital-3"></script>
-  <script defer src="extra-games.js?v=recital-3"></script>
+  <script defer src="extra-games.js?v=relay-1"></script>
   <script defer src="piano-stage.js?v=recital-3"></script>
-  <script defer src="play.js?v=recital-3"></script>
+  <script defer src="play.js?v=relay-1"></script>
   <script defer src="motion-stage.js?v=recital-3"></script>
-  <script defer src="action-coach.js?v=recital-3"></script>
+  <script defer src="action-coach.js?v=relay-1"></script>
   <script defer src="camera-input.js"></script>
-  <script defer src="camera-round.js?v=recital-3"></script>
-  <script defer src="arcade.js?v=recital-3"></script>
+  <script defer src="camera-round.js?v=relay-1"></script>
+  <script defer src="arcade.js?v=relay-1"></script>
   <script defer src="opening.js"></script>
 </head>
 <body>
@@ -60,7 +61,7 @@
         <div class="hero-copy" id="film-followup" hidden>
           <span class="hero-kicker">工位回血</span>
           <h1 tabindex="-1" id="followup-title">夜班行动<span class="title-dot">.</span></h1>
-          <p id="followup-instruction">跟小电从天台展翅出发，用八种动作连闯八关。</p>
+          <p id="followup-instruction">跟小电连闯八关，每轮重新排列八种动作。</p>
           <div class="hero-actions">
             <a class="button primary" id="followup-motion" href="#board"><i data-icon="scan"></i><span>体感八关连闯</span></a>
             <a class="button glass" id="followup-keys" href="#cartridges"><i data-icon="pad"></i>键盘 / 触屏选关</a>
@@ -97,6 +98,10 @@
         </div>
           <aside class="telemetry">
             <span class="eyebrow" id="round-label">动作示范</span><h2 id="phase">天台展翅</h2><p id="live-tip"></p>
+            <section id="relay-route" aria-label="本轮关卡顺序" hidden>
+              <div class="relay-head"><strong>本轮路线</strong><button type="button" id="shuffle-relay">换个顺序</button></div>
+              <ol id="relay-stops"></ol>
+            </section>
             <canvas id="coach-canvas" hidden width="256" height="144" aria-label="本关目标动作示范"></canvas>
             <div id="round-metrics">
               <div class="metric"><span id="hp-label">工位能量</span><strong id="hp">—</strong></div><progress id="hp-bar" max="100" value="0" aria-label="工位能量"></progress>
@@ -112,7 +117,7 @@
             <div id="board-summary" hidden><button class="button primary" id="share-board"><i data-icon="cup"></i><span id="share-board-label">查看战报</span></button></div>
           </aside>
         </div>
-        <div id="guide-library" hidden><h2>选择体感挑战</h2><div id="guide-picker" role="group" aria-label="选择八关连闯或单个动作"></div><p>选择一关可先看动作示范，再开启摄像头挑战。八关连闯从展翅开始。</p></div>
+        <div id="guide-library" hidden><h2>选择体感挑战</h2><div id="guide-picker" role="group" aria-label="选择八关连闯或单个动作"></div><p>单关可以反复练同一个动作。八关连闯每轮洗牌，八种动作各出现一次。</p></div>
       </div>
       <details id="board-offline" class="board-details">
         <summary>连接犀牛派 X1</summary>
@@ -142,7 +147,7 @@
   </dialog>
   <dialog id="help-dialog" class="help-dialog" aria-labelledby="help-title"><div class="modal-top"><img src="art/bot.png" alt="" width="38" height="38"><button class="icon-button" id="close-help" aria-label="关闭说明"><i data-icon="close"></i></button></div>
     <h2 id="help-title">怎么玩？</h2>
-    <dl><dt>跟小电做动作</dt><dd>进体感舞台先看示范。让头、肩和双手入镜，开启摄像头后再跟做。浏览器可以单练或连闯八关，犀牛派默认每轮抽六关。</dd>
+    <dl><dt>跟小电做动作</dt><dd>进体感舞台先看示范。网页八关连闯每轮洗牌，也可以选一关单练。犀牛派默认从八关中轮换选六关，再打乱出场顺序。</dd>
     <dt>用键盘或手机玩</dt><dd>选「键盘 / 触屏」。点卡带，或用 Tab 聚焦卡带、方向键选关、回车进入。点「先试按键」熟悉动作，正式挑战时可按 P 暂停。</dd>
     <dt>从片头进游戏</dt><dd>拖动进度条找到喜欢的动作，点「试玩」就能进入那关。</dd>
     <dt>约朋友挑战</dt><dd>打完一局就能保存海报或发出邀请，在「我的战绩」还能找回最近的战报。</dd></dl>

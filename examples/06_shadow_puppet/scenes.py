@@ -185,6 +185,12 @@ class Stage:
         self.feedback_seq = 0
         self.feedback_time = 0.0
         self.gates = [self._ski_item(18.0 - i * 34.0) for i in range(4)]
+        if self.scene == "piano":
+            # Keep the index-finger warmup for the wrist fallback as well.
+            left = random.sample([0, 1, 2, 4], 3)
+            right = random.sample([5, 7, 8, 9], 3)
+            a, b = random.sample([left, right], 2)
+            self.phrase = [3, 6, a[0], a[1], b[0], b[1], a[2], b[2]]
         self._sync_text()
 
     def _ski_item(self, y: float) -> dict:
@@ -266,6 +272,10 @@ class Stage:
             fingers = ("小指","无名指","中指","食指","拇指","拇指","食指","中指","无名指","小指")
             side = "左手" if self.target_key < 5 else "右手"
             return f"轻弯{side}{fingers[self.target_key]}，再伸直"
+        if self.scene == "ski" and self.got >= 3:
+            return "雪道提速，向下一面旗倾身"
+        if self.scene == "dino" and self.got >= 2:
+            return "加速段，看下一株仙人掌的距离再起跳"
         if self.scene == "turn":
             if not self.armed:
                 return "回正再转"
@@ -482,8 +492,9 @@ class Stage:
         blend = min(1.0, 10.0 * dt)  # ~0.9 at 10 FPS, still responsive
         self.avatar_dx += (target - self.avatar_dx) * blend
         me = AV_X + self.avatar_dx
+        speed = SKI_SPEED * (1.2 if self.got >= 3 else 1.0)
         for g in self.gates:
-            g["y"] += SKI_SPEED * dt
+            g["y"] += speed * dt
             if g["state"] == 0 and abs(g["y"] - SKI_HIT_Y) < 8 and abs(g["x"] - me) < 18:
                 g["state"] = 1
                 self.msg_t = 1.1
@@ -518,7 +529,7 @@ class Stage:
             self.vy = 0.0
 
         shoe = -self.avatar_dy  # how high the feet are
-        self.obs -= DINO_SPEED * dt
+        self.obs -= DINO_SPEED * (1.16 if self.got >= 2 else 1.0) * dt
 
         # Overlap band while the cactus crosses the player.
         half = DINO_HIT_HALF + CACTUS_W // 2
@@ -593,7 +604,7 @@ class Stage:
             self.notes.append([float(8 + key * PIANO_KEY_W), float(GROUND - 48)])
             if good:
                 self._tick("命中亮键")
-                self.target_key = (self.target_key + 3 + int(self.t * 5) % 4) % PIANO_KEYS
+                self.target_key = self.phrase[min(int(self.got), len(self.phrase)-1)]
                 self.gate_msg = "好听！"
                 self.msg_t = 0.4
                 self.fail = 0.0

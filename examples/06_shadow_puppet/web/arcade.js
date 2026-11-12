@@ -179,6 +179,7 @@
   let cameraState = "idle";
   let guideId = "wings";
   let singleMove = null;
+  let relayOrder=window.RoundPatterns.relay(window.CameraRound.ids);
   let guideStart = performance.now();
   let guideTimer;
   let guideKey = "";
@@ -271,9 +272,14 @@
     const action = coach.actions.find(a => a.id === guideId);
     $("view-board").classList.toggle("piano-room",guideId==="piano");
     $("phase").textContent = singleMove ? moves.get(singleMove).title : "八关连闯";
-    $("round-label").textContent = singleMove ? "单关挑战 · " + action.region : "体感挑战 · 8 关";
+    $("round-label").textContent = singleMove ? "单关挑战 · " + action.region : "随机连闯 · 8 关";
     const cue=action.cue;
-    $("live-tip").textContent = singleMove ? cue : "从天台展翅开始，连续完成八种动作。每一关都有示范，整轮有两分钟有效动作时间。";
+    $("live-tip").textContent = singleMove ? cue : "首关「"+moves.get(guideId).title+"」先看左侧示范。两分钟内挑战八种动作。";
+    $("relay-route").hidden=Boolean(singleMove);
+    if(!singleMove) {
+      $("relay-stops").replaceChildren(...relayOrder.map(id=>textElement("li",moves.get(id).title)));
+      $("shuffle-relay").disabled=Boolean(cameraRequest);
+    }
     $("start-label").textContent = cameraFailed ? "重试摄像头" : singleMove ? "开启摄像头玩这关" : "开启摄像头闯八关";
     $("start-camera").hidden = !cameraSupported || Boolean(cameraRequest);
     $("practice-keys").hidden = Boolean(cameraRequest);
@@ -298,6 +304,16 @@
     updateStream();
     drawGuide();
   }
+  function shuffleRelay() {
+    relayOrder=window.RoundPatterns.relay(window.CameraRound.ids,relayOrder[0]);
+    guideId=relayOrder[0];
+  }
+  $("shuffle-relay").addEventListener("click",()=>{
+    if(cameraRequest || boardMode || singleMove)return;
+    shuffleRelay();
+    cameraInfo.textContent=guideId==="piano" ? "首关需要双手入镜，掌心朝向镜头。" : cameraHint;
+    renderPreview();
+  });
   function chooseCourse(value) {
     const hash = value === "all" ? "#board" : "#board/" + value;
     if (location.hash !== hash) {
@@ -324,10 +340,11 @@
   $("practice-keys").addEventListener("click", () => {
     if (cameraRequest || boardMode) return;
     $("mode-keys").click();
-    window.DeskPlay.open(moves.get(singleMove || "wings").id);
+    window.DeskPlay.open(moves.get(guideId).id);
   });
   $("board-keys-link").addEventListener("click", () => $("mode-keys").click());
   function endCamera(message, keepResult=false, failed=false) {
+    if(!singleMove && liveStatus?.source==="camera")shuffleRelay();
     cameraRequest?.abort();
     cameraRequest = null;
     cameraState = "idle";
@@ -345,7 +362,7 @@
   $("start-camera").addEventListener("click", async () => {
     if (cameraRequest || boardMode || !cameraSupported) return;
     const request = new AbortController();
-    const round = new window.CameraRound(singleMove ? [singleMove] : undefined);
+    const round = new window.CameraRound(singleMove ? [singleMove] : relayOrder);
     cameraRequest = request;
     liveStatus = null;
     cameraState = "loading";
@@ -434,6 +451,7 @@
     hitTimer=setTimeout(() => {hit.hidden=true;},750);
   }
   function renderBoard(s) {
+    $("relay-route").hidden=true;
     syncRoundAudio(s);
     const online = Boolean(s);
     const local=s?.source==="camera";
@@ -541,10 +559,10 @@
       if (changeCourse || previousPage!=="board") {
         liveStatus=null;
         cameraFailed=false;
-        cameraInfo.textContent=nextMove==="piano" ? "镜头只需拍清双手。左右手各管五键，手部画面只在本机处理。" : cameraHint;
+        cameraInfo.textContent=(nextMove || relayOrder[0])==="piano" ? "镜头只需拍清双手。左右手各管五键，手部画面只在本机处理。" : cameraHint;
       }
       singleMove=nextMove;
-      guideId=singleMove || "wings";
+      guideId=singleMove || relayOrder[0];
     }
     if (currentPage !== "board") audioRound = "";
     audio.setBase(pageMusic());

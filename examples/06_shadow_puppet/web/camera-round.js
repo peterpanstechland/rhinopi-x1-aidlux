@@ -13,13 +13,12 @@
   ];
   const actById = new Map(acts.map(act => [act.id,act]));
   const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-  const keys = window.FingerPiano.phrase;
-  const sides = [-1,1,1,-1,1,-1];
+  const patterns=window.RoundPatterns;
 
   class CameraRound {
     static ids = Object.freeze(acts.map(act => act.id));
 
-    constructor(ids = CameraRound.ids) {
+    constructor(ids = patterns.relay(CameraRound.ids)) {
       if (!Array.isArray(ids) || !ids.length || ids.some(id => !actById.has(id))) {
         throw new RangeError("请选择有效的体感关卡。");
       }
@@ -44,7 +43,11 @@
       this.feedbackUntil = 0;
       this.gateTime = 0;
       this.gate = 0;
-      this.visual = {left_fill:0,right_fill:0,gates:[],target_key:keys[0],keys_lit:[],
+      const action=this.acts[this.index].id;
+      this.notes=action==="piano" ? patterns.melody() : [];
+      this.gateSides=action==="lean" ? patterns.gates([-1,1]) : [];
+      this.jumpSpeed=73;
+      this.visual = {left_fill:0,right_fill:0,gates:[],target_key:this.notes[0] ?? 2,keys_lit:[],
         alt:0, obs:294, avatar_dy:0, left_got:0, right_got:0};
       this.obstaclePassed = false;
       this.fingers = this.acts[this.index].id==="piano" ? new window.FingerPiano.Tracker() : null;
@@ -150,18 +153,20 @@
       const shoulderShift = (center - this.home.center) / span;
       const lean = clamp((headOffset + shoulderShift*.72)/.38,-1,1);
       this.visual.avatar_dx = lean * 58;
-      const side = sides[this.gate % sides.length];
+      const side = this.gateSides[this.gate];
       const gateX = 160 + side * 48;
       this.gateTime += dt;
-      const hitAt = 2.3;
+      const hitAt = patterns.gatePeriod(2.3,this.count);
       const gateY = 88*this.gateTime/hitAt;
       this.visual.gates = [{x:gateX,y:gateY,kind:"flag",state:0},{x:160-side*48,y:gateY,kind:"tree",state:0}];
-      this.cue = side < 0 ? "向画面左侧倾，碰左旗" : "向画面右侧倾，碰右旗";
+      this.cue = (this.count>=3 ? "加速段 · " : "") + (side < 0 ? "向左倾，碰左旗" : "向右倾，碰右旗");
       if (this.gateTime < hitAt) return;
       if (Math.abs(160 + this.visual.avatar_dx - gateX) < 23) {
         this.count++;
         this.visual.gates[0].state = 1;
-        this.notify("hit", "碰到旗子 +1");
+        const precise=Math.abs(160+this.visual.avatar_dx-gateX)<=9;
+        if(precise)this.score+=20;
+        this.notify("hit", precise ? "正中旗门 · 精准 +20" : "碰到旗子 +1");
         this.gate++;
       } else {
         this.notify("miss",lean*side < -.55 ? "撞树了，向旗子一侧倾" : "错过旗子，再试同一侧");
@@ -169,7 +174,7 @@
       this.gateTime = 0;
     }
     piano({fingering}, dt) {
-      const target = keys[this.count];
+      const target = this.notes[this.count];
       const key=fingering.press;
       this.noteUntil=Math.max(0,this.noteUntil-dt);
       if (!this.noteUntil) this.visual.keys_lit=[];
@@ -181,7 +186,7 @@
         this.feedback.key=key;
         if (match) this.count++;
       }
-      this.visual.target_key=keys[this.count] ?? target;
+      this.visual.target_key=this.notes[this.count] ?? target;
       this.cue="轻弯"+window.FingerPiano.label(this.visual.target_key)+"，再伸直";
     }
     hands_up({shoulderY,span,tilt}, dt) {
@@ -199,7 +204,7 @@
         if (this.jumpClock>=flight) { this.jumpClock=null; this.visual.avatar_dy=0; }
       }
       const previous=this.visual.obs;
-      this.visual.obs-=dt*73;
+      this.visual.obs-=dt*this.jumpSpeed;
       // Sample the crossing interval even when inference frames straddle the cactus.
       if (previous>=152 && this.visual.obs<=168) {
         this.jumpClearance=Math.max(this.jumpClearance,-this.visual.avatar_dy);
@@ -212,12 +217,15 @@
         } else this.notify("miss","碰到仙人掌，靠近时再起跳");
       }
       if (this.visual.obs<100) {
-        this.visual.obs=294;
+        this.visual.obs=282+Math.random()*30;
+        this.jumpSpeed=73*patterns.jumpTempo(this.count);
         this.obstaclePassed=false;
         this.jumpClearance=0;
       }
+      this.visual.launch_x=160+this.jumpSpeed*.70;
       this.cue=this.jumpClock!==null ? "跳起来了，落回坐姿" : !this.jumpReady ? "回到初始坐姿再跳" :
-        this.visual.obs>160 && this.visual.obs<211 ? "现在轻挺上身，双肩一起抬起！" : "坐稳，等仙人掌靠近";
+        this.visual.obs>160 && this.visual.obs<this.visual.launch_x ? "现在轻挺上身，双肩一起抬起！" :
+        this.jumpSpeed>73 ? "加速段 · 看下一株仙人掌再起跳" : "坐稳，等仙人掌靠近";
     }
     turn({points,center,span,tilt}) {
       const yaw=(points[0].x-center)/span-this.home.nose;

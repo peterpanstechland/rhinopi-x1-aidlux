@@ -10,9 +10,9 @@
     {id:'wings', name:'展翅', cue:'双手向两边伸开，手腕和肩膀同高，稳稳保持。', goal:'平举保持 5 秒', region:'双臂'},
     {id:'flap', name:'老鹰', cue:'把双臂伸向两侧，像扇翅膀一样同时抬起、落下。', goal:'扇动 8 次', region:'双臂'},
     {id:'wave', name:'挥手', cue:'抬一只手到肩膀上方，在脸旁左右摆动手腕。', goal:'挥手送走 10 人', region:'单手'},
-    {id:'lean', name:'滑雪', cue:'面对屏幕，把头和上身偏向旗子一侧，避开树。', goal:'碰到 6 面旗', region:'头和上身'},
+    {id:'lean', name:'滑雪', cue:'把头和上身偏向旗子一侧。收集三面旗后雪道提速，对准旗门中心还有精准奖励。', goal:'碰到 6 面旗', region:'头和上身'},
     {id:'piano', name:'弹琴', cue:'一根手指对应一个琴键。掌心朝镜头，轻弯金色指尖对应的手指，伸直就松键。', goal:'跟着金色指尖弹出 8 个音', region:'十指'},
-    {id:'hands_up', name:'跳跃', cue:'仙人掌靠近时，坐着让双肩随上身快速上提一次，再放松落回。', goal:'越过 5 个仙人掌', region:'双肩和上身'},
+    {id:'hands_up', name:'跳跃', cue:'仙人掌靠近时，坐着轻挺上身再落回。越过两株后速度提高，看清间距再跳。', goal:'越过 5 个仙人掌', region:'双肩和上身'},
     {id:'turn', name:'转头', cue:'保持双肩朝前，转脸看向一侧，回正后再转向另一侧。', goal:'左右各转 3 次', region:'头部'},
     {id:'nod', name:'点头', cue:'双肩保持原位，低一下头，再抬起看正前方。', goal:'完成 6 次点头', region:'头部'}
   ];
@@ -87,7 +87,7 @@
     }
     if (id==='hands_up' && Number.isFinite(visual.obs)) {
       if (visual.avatar_dy < -1) return target(2,'落回坐姿');
-      const launch=s.source==='camera' ? 211 : 260;
+      const launch=visual.launch_x ?? (s.source==='camera' ? 211 : 260);
       return visual.obs>160 && visual.obs<launch ? target(1,'现在轻挺上身') : target(0,'坐稳，等仙人掌');
     }
     if (id==='turn') {

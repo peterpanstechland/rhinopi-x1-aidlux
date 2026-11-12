@@ -2,6 +2,7 @@
 const assert = require("node:assert/strict");
 const test = require("node:test");
 global.window = {};
+require("./web/round-patterns.js");
 require("./web/finger-piano.js");
 require("./web/piano-stage.js");
 require("./web/camera-round.js");
@@ -55,6 +56,7 @@ function player(ids) {
   const round = new CameraRound(ids);
   let now = 0;
   return {
+    order:round.acts.map(a=>a.id),
     status:null,
     tick(pose={},n=1,interval=100) {
       for (let i=0;i<n;i++) this.status=round.update(frame(pose),now+=interval);
@@ -119,12 +121,44 @@ test("each serialised action is playable on its own, and a relay carries its ful
     assert.equal(solo.status.phase,"summary");
     assert.equal(solo.status.cleared,1);
     playAction(relay);
-    assert.equal(relay.status.results[index].id,id);
+    assert.equal(relay.status.results[index].id,relay.order[index]);
     assert.equal(relay.status.cleared,index+1);
   });
   assert.equal(relay.status.phase,"summary");
   assert.equal(relay.status.round_len,8);
-  assert.equal(relay.status.round_score,3250);
+  assert.equal(relay.status.round_score,3370); // Six centered ski gates earn 20 extra each.
+});
+
+test("default relays are shuffled, explicit courses keep their order and goals stay balanced",t=>{
+  const rules=window.RoundPatterns, ids=CameraRound.ids;
+  let seed=17;
+  t.mock.method(Math,"random",()=>{seed=seed*16807%2147483647;return (seed-1)/2147483646;});
+  const first=new Set(), runs=new Set(), phrases=new Set();
+  for(let i=0;i<80;i++) {
+    const order=player().order;
+    assert.deepEqual([...order].sort(),[...ids].sort());
+    assert.notEqual(rules.relay(ids,order[0])[0],order[0]);
+    first.add(order[0]);runs.add(order.join());
+    const keys=rules.melody();
+    assert.deepEqual(keys.slice(0,2),[2,7]);
+    assert.equal(new Set(keys).size,8);
+    assert.equal(keys.filter(k=>k<5).length,4);
+    assert.equal(keys[2]<5,keys[3]<5);
+    assert.equal(keys[4]<5,keys[5]<5);
+    assert.notEqual(keys[2]<5,keys[4]<5);
+    phrases.add(keys.join());
+    for(const lanes of [[-1,1],[0,1,2]]) {
+      const gates=rules.gates(lanes);
+      assert.equal(gates.length,6);
+      for(const lane of lanes) assert.equal(gates.filter(x=>x===lane).length,6/lanes.length);
+      assert.ok(gates.every((x,j)=>j<2 || x!==gates[j-1] || x!==gates[j-2]));
+    }
+  }
+  assert.equal(first.size,8);
+  assert.ok(runs.size>40 && phrases.size>20);
+  assert.deepEqual(player(["nod","wave"]).order,["nod","wave"]);
+  assert.equal(rules.gatePeriod(2.3,2),2.3);
+  assert.ok(rules.gatePeriod(2.3,3)<2.3 && rules.jumpTempo(2)>rules.jumpTempo(1));
 });
 
 test("piano uses individual fingertip joints, ignores hand translation and rearms after release",()=>{

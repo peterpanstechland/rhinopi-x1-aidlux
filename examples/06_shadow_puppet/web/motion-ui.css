@@ -34,6 +34,14 @@
 #view-board #guide-picker button[aria-pressed=true] {background:#c5ebbc;color:#223b30;border-color:#dcf6cc;box-shadow:0 2px 0 #6a9176}
 #view-board #guide-picker button:hover:not(:disabled) {border-color:#e3cfb1}
 #view-board .board-details summary {min-height:32px;padding:4px}
+#relay-route {border-block:1px solid #b7a991;padding:8px 0 9px;margin:13px 0;color:inherit}
+.relay-head {display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:13px}
+#shuffle-relay {font:inherit;color:inherit;border:1px solid currentColor;background:transparent;border-radius:6px;padding:5px 9px;cursor:pointer}
+#shuffle-relay:disabled {opacity:.5;cursor:default}
+#relay-stops {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:5px 12px;list-style:none;counter-reset:stop;margin:8px 0 0;padding:0}
+#relay-stops li {counter-increment:stop;display:flex;gap:7px;align-items:center;font-size:13px;line-height:1.5}
+#relay-stops li::before {content:counter(stop,decimal-leading-zero);font:600 10px var(--mono);opacity:.72}
+#relay-stops li:first-child {font-weight:750}
 #view-board.piano-room .live-display {background:#22313b;border:1px solid #53616a;box-shadow:0 5px 18px #0b111730}
 #view-board.piano-room .stage-toolbar {background:#26333e}
 #view-board.piano-room .stage-views button[aria-pressed=true] {background:#e4cd9f;color:#302d34}

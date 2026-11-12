@@ -20,7 +20,7 @@
       title:"仙人掌跳跃", short:"CACTUS RUN", mark:"06", art:"hands_up", color:"#f8b58c",
       target:5, limit:30, unit:"个障碍",
       brief:"让仙人掌靠近脚边再起跳，越过五个就通关。",
-      hint:"仙人掌靠近时按空格或点「起跳」，小电会提肩腾空。等双脚落地，再准备下一跳。",
+      hint:"仙人掌靠近时按空格或点「起跳」。越过两株后节奏加快，留意下一株的距离。",
       pads:[["Space","起跳"]], keys:[" "],
     },
     turn: {
@@ -40,11 +40,10 @@
   };
   const JUMP_DURATION = .92;
   const CROSSING = 2.15;
-  const NEXT_CACTUS = 2.75;
 
   function init() {
     return {raised:false, side:0, left:0, right:0, down:false, downAt:0, lastWave:1,
-      jumpTime:JUMP_DURATION, obstacleTime:0, judged:false};
+      jumpTime:JUMP_DURATION, obstacleTime:0, crossing:CROSSING, tempo:1, judged:false};
   }
   function jumpHeight(s) {
     return 51*Math.sin(Math.PI*Math.min(1,s.extra.jumpTime/JUMP_DURATION));
@@ -56,7 +55,7 @@
       case "wave": return 1-e.lastWave;
       case "nod": return e.down ? (s.elapsed-e.downAt>=.35 ? 1 : -1) : 0;
       case "turn": return e.side ? 1 : e.left<=e.right ? 0 : 2;
-      case "hands_up": return e.jumpTime>=JUMP_DURATION && !e.judged && e.obstacleTime>=CROSSING-.68 && e.obstacleTime<CROSSING-.16 ? 0 : -1;
+      case "hands_up": return e.jumpTime>=JUMP_DURATION && !e.judged && e.obstacleTime>=e.crossing-.68 && e.obstacleTime<e.crossing-.16 ? 0 : -1;
       default: return -1;
     }
   }
@@ -67,7 +66,7 @@
       case "nod": return !e.down ? "向下点头给灯芯充能" : s.elapsed-e.downAt<.35 ? "保持片刻，等待绿灯" : "绿灯亮起 · 抬头";
       case "hands_up":
         if (e.jumpTime<JUMP_DURATION) return "腾空中";
-        return wanted(s)===0 ? "现在起跳" : "等待仙人掌靠近";
+        return wanted(s)===0 ? "现在起跳" : e.tempo>1 ? "加速段 · 等下一株靠近" : "等待仙人掌靠近";
       default: return "下一步 · " + s.config.pads[wanted(s)][1];
     }
   }
@@ -121,15 +120,18 @@
     e.obstacleTime+=dt;
     const jumpBefore=e.jumpTime;
     e.jumpTime=Math.min(JUMP_DURATION,e.jumpTime+dt);
-    if (!e.judged && e.obstacleTime>=CROSSING) {
+    if (!e.judged && e.obstacleTime>=e.crossing) {
       e.judged=true;
       // Sample the jump at the crossing instant, including on slow displays.
-      const t=Math.min(JUMP_DURATION,jumpBefore+CROSSING-before);
+      const t=Math.min(JUMP_DURATION,jumpBefore+e.crossing-before);
       const passed=51*Math.sin(Math.PI*t/JUMP_DURATION)>25;
       award(passed,120,passed?"越过仙人掌！":"碰到尖刺，试试下一株");
     }
-    if (e.obstacleTime>=NEXT_CACTUS) {
-      e.obstacleTime-=NEXT_CACTUS;
+    const next=e.crossing+.60;
+    if (e.obstacleTime>=next) {
+      e.obstacleTime-=next;
+      e.tempo=window.RoundPatterns.jumpTempo(s.hits);
+      e.crossing=s.practice ? CROSSING : (CROSSING+(Math.random()-.5)*.36)/e.tempo;
       e.judged=false;
     }
   }
@@ -207,7 +209,7 @@
       case "hands_up":
         visual.shoulder_lift = a.lift;
         visual.avatar_dy = -jumpHeight(s);
-        visual.obs = 160+(CROSSING-e.obstacleTime)*81;
+        visual.obs = 160+(e.crossing-e.obstacleTime)*81*e.tempo;
         break;
     }
     return {phase:"round",sub:"play",act_id:s.moveId,pose_aspect:aspect,pose_points:points,
