@@ -119,19 +119,16 @@
     }
   }
   function arrow(c,x1,y1,x2,y2,color) {
-    segment(c,[x1,y1],[x2,y2],2,color);
     const angle = Math.atan2(y2-y1,x2-x1);
-    for (const offset of [-.65,.65]) segment(c,[x2,y2],
-      [x2-5*Math.cos(angle+offset),y2-5*Math.sin(angle+offset)],2,color);
-  }
-  function backdrop(c) {
-    box(c,0,0,W,H,'#242438');
-    for (let x=7;x<W;x+=12) for (let y=7;y<123;y+=12) box(c,x,y,1,1,'#3a374d');
-    box(c,0,112,W,13,'#29273c');
-    box(c,0,112,W,1,'#3d394e');
-    for (const x of [8,242]) for (const y of [8,116]) {
-      box(c,x,y,6,1,dim); box(c,x+(x>128?5:0),y+(y>100?-5:0),1,6,dim);
+    for (const [width,tint] of [[4,ink],[2,color]]) {
+      segment(c,[x1,y1],[x2,y2],width,tint);
+      for (const offset of [-.65,.65]) segment(c,[x2,y2],
+        [x2-5*Math.cos(angle+offset),y2-5*Math.sin(angle+offset)],width,tint);
     }
+  }
+  function backdrop(c,id) {
+    window.MotionStage.paintBackdrop(c,id,W,125);
+    box(c,0,0,W,125,id==='piano'?'#251b383e':'#28233920');
   }
   // The guide feeds the same shoulder, elbow and wrist landmarks as a live player.
   function demoAvatar(c, id, pose) {
@@ -154,6 +151,7 @@
       box(c,108,111,40,5,'#76738a');
       box(c,112,116,3,8,dim); box(c,141,116,3,8,dim);
     }
+    box(c,109+pose.lean*7,115,40,3,'#29233770');
     window.MotionStage.paintAvatar(c, {
       phase:'round', act_id:id, pose_points:points, pose_aspect:1, challenge:{visual}
     },128 + pose.lean * 7,116 - pose.lift * 11,.98);
@@ -266,7 +264,7 @@
     c.imageSmoothingEnabled=false;
     const seconds=Math.max(0,Number.isFinite(elapsedSeconds)?elapsedSeconds:0);
     const f=liveFrame(id,steps,frame(steps,seconds),snapshot);
-    backdrop(c);
+    backdrop(c,id);
     const input=snapshot?.challenge?.piano_input || snapshot?.challenge?.visual?.piano_input;
     const wrist=id==='piano' && (input==='wrists' || input==='wrist');
     if(id==='piano') {

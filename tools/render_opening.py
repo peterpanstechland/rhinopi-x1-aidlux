@@ -934,21 +934,8 @@ def product_epilogue(t):
     lettering(d,(24,31),title,32,"#f3ede1","lm")
     mode=product_art("mode")
     fit_into(frame,mode,(388,9,356,48))
-    # Preserve the original capture's card art, order and colours. Re-typeset its
-    # eight titles at phone-video size instead of shrinking each card's fine print.
-    deck=product_art("deck")
-    titles=("天台展翅",*(entry[0] for entry in ROUTE))
-    for i,name in enumerate(titles):
-        row,col=divmod(i,4)
-        left=round(col*deck.width/4)+2;top=round(row*deck.height/2)+2
-        right=round((col+1)*deck.width/4)-4
-        cut=deck.crop((left,top,right,top+round(deck.height*.243)))
-        x=16+col*185;y=67+row*139
-        d.rounded_rectangle((x,y,x+176,y+128),radius=8,fill="#242638",outline="#576072",width=2)
-        frame.paste(cut.resize((172,74),Image.Resampling.LANCZOS),(x+2,y+2))
-        lettering(d,(x+10,y+99),name,24,"#f1eee7","lm")
-        d.line((x+150,y+98,x+159,y+98),fill="#a1c6b0",width=2)
-        path(d,[(x+155,y+94),(x+159,y+98),(x+155,y+102)],"#a1c6b0",2)
+    # Show the actual playable cartridge selector, including each motion target.
+    fit_into(frame,product_art("deck"),(16,66,736,282))
     speech(frame,"同事","下次算我一个！")
     return frame
 

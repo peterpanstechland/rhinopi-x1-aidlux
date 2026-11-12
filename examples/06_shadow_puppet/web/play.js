@@ -8,14 +8,14 @@
       title: "天台展翅", short: "ROOFTOP", mark: "01", art: "rooftop",
       color: "#d6bcff", target: 5, limit: 25, unit: "节拍",
       brief: "光标进入绿色节拍区时，帮小电展开双翼。",
-      hint: "光标到绿区时，按空格或点「展翅」，小电会把双臂平举到肩高。越靠近绿区中心，得分越高。",
+      hint: "光标进入绿区就按空格或点「展翅」。越靠近浅绿中心，得分越高。",
       pads: [["Space", "展翅"]],
     },
     alpine: {
       title: "雪岭穿梭", short: "ALPINE", mark: "04", art: "alpine",
       color: "#9ef3dc", target: 6, limit: 18, unit: "旗门",
       brief: "提前切到旗门所在雪道，让小电穿过六面旗。",
-      hint: "按左右方向键或点选雪道，小电会向那一侧倾身。旗门到脚下时，站在同一道就算通过。",
+      hint: "用 ← → 换道，或点下方雪道。让小电站稳在下一面旗门所在的道上。",
       pads: [["1", "左道"], ["2", "中道"], ["3", "右道"]],
     },
     synth: {
@@ -31,13 +31,18 @@
     lean:"alpine",piano:"synth",hands_up:"hands_up",turn:"turn",nod:"nod"});
   const catalog = Object.freeze(Object.entries(motionToCartridge).map(([moveId,id]) => Object.freeze({
     id,moveId,title:games[id].title,art:games[id].art,short:games[id].short,
+    pads:games[id].pads.map(pair=>pair.slice()),
   })));
   const lanes = ["左道", "中道", "右道"];
   const art = new Map();
   const key = "desk-arcade.history.v1";
+  const roundPrefix = "desk-arcade.round.v2/";
+  const tabId = globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
+  const unsaved = new Map();
+  let legacySnapshot = null, storedRounds = new Map();
   const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
   const W = 320, H = 126;
-  let dialog, shell, closeButton, session, refs, raf, arcadeScene, pressedTimer;
+  let dialog, shell, closeButton, session, refs, raf, arcadeScene;
   let history = [];
   let stats = {day: "", runs: 0, best: 0, played: []};
 
@@ -101,6 +106,7 @@
       total, seconds: number(value.seconds),
       at: Number.isFinite(at) && at > 0 && at <= 8640000000000000 ? at : Date.now(),
       mode: motion ? value.mode : "arcade",
+      tab: typeof value.tab === "string" ? value.tab.slice(0,64) : undefined,
       course: value.mode==="camera" && !move && value.course===8 ? 8 : undefined,
       playedIds: [...new Set(visited)],
       moves: motion && Array.isArray(value.moves) ? value.moves.filter(n=>typeof n==="string").slice(0,8).map(n=>n.slice(0,10)) : [],
@@ -111,8 +117,13 @@
     if (stats.day !== today) { stats.day = today; stats.runs = 0; }
     if (new Date(r.at).toDateString() === today) stats.runs++;
     stats.best = Math.max(stats.best, r.score);
-    const played = r.mode==="arcade" ? [r.id] : r.playedIds.map(id=>motionToCartridge[id]);
-    for (const id of played) if (!stats.played.includes(id)) stats.played.push(id);
+    for (const id of playedGames(r)) if (!stats.played.includes(id)) stats.played.push(id);
+  }
+  function playedGames(r) {
+    return r.mode==="arcade" ? [r.id] : r.playedIds.map(id=>motionToCartridge[id]);
+  }
+  function roundKey(r) {
+    return roundPrefix + r.id + "/" + r.at + "/" + (r.tab || "");
   }
   function readSaved(raw) {
     const value = JSON.parse(raw || "[]");
@@ -128,16 +139,78 @@
       history.forEach(addStats);
     }
   }
-  try { readSaved(localStorage.getItem(key)); }
-  catch { /* Storage is optional in private and local-file contexts. */ }
+  function reloadResults(prune=false) {
+    let store;
+    try {
+      store = localStorage;
+      const current = new Map();
+      for (const id of Object.keys(store)) {
+        if (!id.startsWith(roundPrefix)) continue;
+        try {
+          const row = cleanResult(JSON.parse(store.getItem(id)));
+          if (row && roundKey(row)===id) current.set(id,row);
+        } catch { /* Ignore this damaged round and keep the others. */ }
+      }
+      legacySnapshot = store.getItem(key);
+      storedRounds = current;
+    } catch { /* Keep the last readable snapshot when storage becomes unavailable. */ }
+    const rounds = new Map([...storedRounds,...unsaved]);
+    history = [];
+    stats = {day:"", runs:0, best:0, played:[]};
+    try { readSaved(legacySnapshot); } catch { /* Ignore an unreadable legacy snapshot. */ }
+    // Old installs keep their fifteen visible rows and their full lifetime totals.
+    // A mixed-version tab may also have published a board round to the old snapshot.
+    const legacy = new Set(history.map(r=>r.id + "/" + r.at));
+    const rows = [...rounds.values()].filter(r=>!legacy.has(r.id + "/" + r.at));
+    rows.forEach(addStats);
+    history = history.concat(rows).sort((a,b)=>b.at-a.at || roundKey(a).localeCompare(roundKey(b))).slice(0,15);
+    if (!prune) return;
+
+    // Retain this day's count, the recent list, and a witness for the lifetime
+    // best and each played cartridge. All other older rows can be discarded.
+    const keep = new Set(history.map(roundKey));
+    const played = new Set();
+    const midnight = new Date().setHours(0,0,0,0);
+    rows.sort((a,b)=>b.score-a.score || b.at-a.at || roundKey(a).localeCompare(roundKey(b)));
+    for (const [i,row] of rows.entries()) {
+      const ids = playedGames(row);
+      if (!i || row.at>=midnight || ids.some(id=>!played.has(id))) keep.add(roundKey(row));
+      ids.forEach(id=>played.add(id));
+    }
+    for (const id of rounds.keys()) {
+      if (keep.has(id)) continue;
+      try { store?.removeItem(id); storedRounds.delete(id); } catch { /* Retry on the next completed round. */ }
+      unsaved.delete(id);
+    }
+    if (store) for (const [id,row] of unsaved) {
+      try {
+        store.setItem(id,JSON.stringify(row));
+        storedRounds.set(id,row);
+        unsaved.delete(id);
+      } catch { break; }
+    }
+  }
+  reloadResults(true);
+  window.addEventListener("storage", event => {
+    if (event.key!==null && event.key!==key && !event.key.startsWith(roundPrefix)) return;
+    reloadResults();
+    window.dispatchEvent(new CustomEvent("desk:result"));
+  });
 
   function recordResult(value) {
     const result = cleanResult(value);
     if (!result) return;
-    if (history.some(item => item.id === result.id && item.at === result.at)) return;
-    history = [result, ...history].slice(0, 15);
-    addStats(result);
-    try { localStorage.setItem(key, JSON.stringify({history,stats})); } catch { /* Keep this visit in memory. */ }
+    if (history.some(item => !item.tab && item.id===result.id && item.at===result.at)) return;
+    // Two local games may finish in the same millisecond. Multiple viewers of
+    // a board are seeing one shared round, identified by its ending timestamp.
+    if (result.mode!=="board" && !result.tab) result.tab = tabId;
+    const id = roundKey(result);
+    if (unsaved.has(id)) return;
+    try {
+      if (localStorage.getItem(id)!==null) return;
+      localStorage.setItem(id,JSON.stringify(result));
+    } catch { unsaved.set(id,result); }
+    reloadResults(true);
     window.dispatchEvent(new CustomEvent("desk:result", {detail: {...result}}));
   }
 
@@ -146,21 +219,29 @@
     dialog = el("dialog", "dp-dialog");
     dialog.setAttribute("aria-labelledby", "dp-title");
     document.body.append(dialog);
-    dialog.addEventListener("cancel", () => teardown());
+    dialog.addEventListener("cancel", event => {
+      if (["countdown","playing"].includes(session?.phase)) {
+        event.preventDefault();
+        pause();
+      }
+    });
     dialog.addEventListener("close", () => { if (!dialog.open) teardown(); });
     dialog.addEventListener("click", event => {
       if (event.target !== dialog) return;
       const b = dialog.getBoundingClientRect();
-      if (event.clientX < b.left || event.clientX > b.right || event.clientY < b.top || event.clientY > b.bottom) dialog.close();
+      if (event.clientX < b.left || event.clientX > b.right || event.clientY < b.top || event.clientY > b.bottom) {
+        if (["countdown","playing"].includes(session?.phase)) pause();
+        else dialog.close();
+      }
     });
     dialog.addEventListener("keydown", keyDown);
     document.addEventListener("visibilitychange", () => {
-      if (document.hidden && session && ["countdown", "playing"].includes(session.phase)) pause();
+      if (document.hidden) pause();
     });
+    window.addEventListener("blur",pause);
   }
   function teardown(restoreAudio = true) {
     cancelAnimationFrame(raf);
-    clearTimeout(pressedTimer);
     session = null;
     refs = null;
     if (restoreAudio && arcadeScene) {
@@ -187,7 +268,7 @@
     const actions = el("div", "dp-header-actions");
     closeButton = button("dp-icon", "×", () => dialog.close());
     closeButton.setAttribute("aria-label", "关闭并返回大厅");
-    closeButton.title = "关闭 · Esc";
+    closeButton.title = "关闭并返回大厅";
     actions.append(closeButton);
     header.append(name, actions);
     shell.append(header);
@@ -200,13 +281,14 @@
     if (!Object.hasOwn(games, id)) return;
     const config = games[id];
     const moveId = catalog.find(game => game.id === id).moveId;
-    const actions = frame(config.title, "RE:CHARGE ARCADE / " + config.short, config.mark, config.color, true);
+    const actions = frame(config.title, config.short, config.mark, config.color, true);
+    shell.classList.add("dp-console");
     arcadeScene = moveId;
     window.DeskAudio?.scene(moveId);
     picture(config.art);
     session = {
       id, moveId, config, avatar: extra.newAvatar(), pressAt: -10, phase: "brief", elapsed: 0, countdown: 0, last: 0, hits: 0,
-      score: 0, combo: 0, flash: 0, good: true, cooldown: 0, cursor: .13,
+      score: 0, combo: 0, flash: 0, good: true, cooldown: 0, cursor: .13, practice: false,
       zone: .64, lane: 1, laneDraw: 1, gate: 0, gateTime: 0, lastKey: -1,
       gateLanes: [0, 2, 1, 0, 1, 2], notes: [0, 1, 2, 1, 3, 2, 1, 0],
     };
@@ -218,20 +300,24 @@
     });
     pauseButton.hidden = true;
     pauseButton.setAttribute("aria-label", "暂停挑战");
+    pauseButton.title = "P 暂停或继续 · Esc 暂停";
+    pauseButton.setAttribute("aria-keyshortcuts","P");
     actions.prepend(pauseButton);
     const stage = el("div", "dp-stage");
     const canvas = el("canvas", "dp-canvas");
     canvas.width = W;
     canvas.height = H;
     canvas.setAttribute("aria-label", config.title + "小游戏画面");
+    canvas.tabIndex = -1;
     const counts = el("div", "dp-counts");
     const clock = el("span", "dp-stat");
     const points = el("span", "dp-stat");
-    counts.append(clock, points);
+    const phaseLabel=el("span","dp-phase-label");
+    counts.append(phaseLabel, clock, points);
     const feedback = el("span", "dp-feedback");
     feedback.setAttribute("role", "status");
     const cover = el("div", "dp-cover");
-    stage.append(canvas, counts, feedback, cover);
+    stage.append(canvas, cover);
     const brief = el("div", "dp-brief");
     const head = el("div", "dp-progress-head");
     const objective = el("span");
@@ -242,30 +328,85 @@
     meter.append(fill);
     const pads = el("div", "dp-pad-row");
     const controls = config.pads.map(([hotkey, label], index) => {
-      const pad = button("dp-pad", "", () => input(index));
-      pad.append(el("kbd", "", hotkey), document.createTextNode(label));
+      const pad = el("button", "dp-pad");
+      pad.type="button";
+      // Keyboard activation and assistive technology issue a click without a pointer.
+      pad.addEventListener("click",event=>{if(event.detail===0) input(index);});
+      pad.addEventListener("animationend",()=>pad.classList.remove("dp-pressed"));
+      pad.append(el("kbd", "", hotkey==="Space" ? "空格" : hotkey), el("span","",label));
       pads.append(pad);
       return pad;
     });
-    brief.append(head, meter, el("p", "dp-help", config.hint), pads);
-    shell.append(stage, brief);
-    refs = {canvas, ctx: canvas.getContext("2d"), cover, counts, clock, points, feedback, objective, count, fill, controls, pauseButton};
-    canvas.addEventListener("pointerdown", event => {
-      if (!session || session.phase !== "playing") return;
+    const help=el("p","dp-help",config.hint);
+    const commands=el("div","dp-commands");
+    const launch=button("dp-primary","开始挑战",start);
+    const rehearse=button("dp-secondary","先试按键",practice);
+    commands.append(launch,rehearse);
+    const status=el("div","dp-input-status");
+    status.append(feedback);
+    brief.append(head, meter, help, pads, status, commands);
+    shell.append(counts, stage, brief);
+    refs = {canvas, ctx: canvas.getContext("2d"), cover, counts, clock, points, feedback, objective, count, fill, controls, pauseButton, phaseLabel, help, commands, launch, rehearse, status};
+    bindPads(pads,controls);
+    const contacts=new Map();
+    function playAt(event) {
+      if (session?.phase !== "playing") return;
       const bounds = canvas.getBoundingClientRect();
       const x = (event.clientX - bounds.left) / bounds.width;
-      if (id === "synth" && (event.clientY - bounds.top) / bounds.height * H < 73) return;
+      const y = (event.clientY - bounds.top) / bounds.height * H;
+      if (x<0 || x>=1 || y<0 || y>H || (id==="synth" && (y<73 || y>114))) {
+        contacts.set(event.pointerId,-1);
+        return;
+      }
       let index = 0;
       if (session.extra || id==="alpine") index = Math.min(controls.length-1, Math.floor(x * controls.length));
       if (id==="synth") index = Math.floor((x * W - 36) / 62);
-      if (index >= 0 && index < controls.length) input(index);
+      if (index >= 0 && index < controls.length && contacts.get(event.pointerId)!==index) input(index);
+      contacts.set(event.pointerId,index);
+    }
+    canvas.addEventListener("pointerdown", event => {
+      if(session?.phase!=="playing" || event.button!==0) return;
+      event.preventDefault();
+      canvas.setPointerCapture(event.pointerId);
+      playAt(event);
     });
-    const rival = inviteScore(id);
-    showCover(rival === null ? "准备出发" : "好友擂台 · " + rival + " 分", config.brief, "开始挑战", start);
+    canvas.addEventListener("pointermove",event=>{
+      if(contacts.has(event.pointerId) && (id==="synth" || id==="alpine")) playAt(event);
+    });
+    canvas.addEventListener("lostpointercapture",event=>contacts.delete(event.pointerId));
+    canvas.addEventListener("pointerup",event=>contacts.delete(event.pointerId));
+    canvas.addEventListener("pointercancel",event=>contacts.delete(event.pointerId));
+    cover.hidden=true;
     syncUi();
     paint();
+    launch.focus({preventScroll:true});
     const image = picture(config.art);
     if (!image.complete) image.addEventListener("load", () => { if (session?.id === id) paint(); }, {once:true});
+  }
+
+  function bindPads(row, controls) {
+    const pointers=new Map();
+    function hit(event) {
+      const pad=document.elementFromPoint(event.clientX,event.clientY)?.closest(".dp-pad");
+      if (pointers.get(event.pointerId)===pad) return;
+      pointers.set(event.pointerId,pad);
+      const index=controls.indexOf(pad);
+      if(index>=0) input(index);
+    }
+    row.addEventListener("pointerdown",event=>{
+      if(session?.phase!=="playing" || event.button!==0 || !event.target.closest(".dp-pad")) return;
+      // A final press can focus a new action before the browser's default mousedown.
+      event.preventDefault();
+      row.setPointerCapture(event.pointerId);
+      hit(event);
+    });
+    row.addEventListener("pointermove",event=>{
+      if(!pointers.has(event.pointerId) || session?.phase!=="playing") return;
+      if(session.id==="synth" || session.id==="alpine") hit(event);
+    });
+    row.addEventListener("lostpointercapture",event=>pointers.delete(event.pointerId));
+    row.addEventListener("pointercancel",event=>pointers.delete(event.pointerId));
+    row.addEventListener("pointerup",event=>pointers.delete(event.pointerId));
   }
 
   function showCover(heading, description, label, fn) {
@@ -279,13 +420,26 @@
     }
   }
   function start() {
-    if (session?.phase !== "brief") return;
+    if (!session) return;
+    if (session.practice) open(session.id);
+    if (session.phase !== "brief") return;
     window.DeskAudio?.cue("start");
     session.phase = "countdown";
     session.countdown = 3;
     showCover("3", "跟上小电的节奏");
     refs.pauseButton.hidden = false;
-    refs.pauseButton.focus({preventScroll:true});
+    refs.canvas.focus({preventScroll:true});
+    syncUi();
+    schedule();
+  }
+  function practice() {
+    if(session?.phase!=="brief") return;
+    session.practice=true;
+    session.phase="playing";
+    refs.pauseButton.hidden=false;
+    refs.canvas.focus({preventScroll:true});
+    syncUi();
+    paint();
     schedule();
   }
   function schedule() {
@@ -312,17 +466,23 @@
     refs.pauseButton.setAttribute("aria-label", "暂停挑战");
     if (session.phase === "countdown") showCover(String(Math.ceil(session.countdown)), "跟上小电的节奏");
     else refs.cover.hidden = true;
-    refs.pauseButton.focus({preventScroll:true});
+    refs.canvas.focus({preventScroll:true});
     syncUi();
     schedule();
   }
 
   function keyDown(event) {
-    if (event.altKey || event.ctrlKey || event.metaKey || !session || session.phase !== "playing") return;
+    if (event.altKey || event.ctrlKey || event.metaKey || event.isComposing || !session) return;
     const keyName = event.key.toLowerCase();
+    if (keyName==="p" && ["playing","countdown","paused"].includes(session.phase)) {
+      event.preventDefault();
+      if (!event.repeat) { if(session.phase==="paused") resume(); else pause(); }
+      return;
+    }
+    if (session.phase !== "playing") return;
+    if (keyName===" " && event.target.closest("button:not(.dp-pad)")) return;
     let index = -1;
     if (session.id === "rooftop" && keyName === " ") {
-      if (event.target === closeButton || event.target === refs.pauseButton) return;
       index = 0;
     }
     if (session.id === "alpine") {
@@ -332,7 +492,6 @@
     }
     if (session.id === "synth") index = ["a","s","d","f"].indexOf(keyName);
     if (session.extra) {
-      if (keyName === " " && (event.target === closeButton || event.target === refs.pauseButton)) return;
       index=session.config.keys.indexOf(keyName);
     }
     if (index < 0) return;
@@ -354,33 +513,35 @@
     }
     if (success && s.id === "synth") window.DeskAudio?.note(s.lastKey);
     else window.DeskAudio?.cue(success ? "hit" : "miss");
-    tell(message);
+    refs.feedback.dataset.kind=success ? "hit" : "miss";
+    tell(success && !s.practice ? message + "　+" + (points+Math.min(5,s.combo-1)*10) : message);
   }
   function input(index) {
     const s = session;
     if (!s || s.phase !== "playing") return;
-    refs.controls.forEach((pad, i) => pad.classList.toggle("dp-pressed", i === index));
-    clearTimeout(pressedTimer);
-    pressedTimer = setTimeout(() => refs?.controls?.forEach(p => p.classList.remove("dp-pressed")), 145);
+    const pressed=refs.controls[index];
+    if(!pressed) return;
+    pressed.classList.remove("dp-pressed");
+    void pressed.offsetWidth;
+    pressed.classList.add("dp-pressed");
     if (s.extra) {
       extra.press(s,index,award);
     } else if (s.id === "rooftop" && s.cooldown <= 0) {
       s.pressAt = s.elapsed;
       const distance = Math.abs(s.cursor - s.zone);
       const hit = distance <= .125;
-      award(hit, distance < .055 ? 120 : 80, hit ? (distance < .055 ? "完美节拍！" : "展翅成功！") : "早了一点？瞄准绿区再试");
+      award(hit, distance < .055 ? 120 : 80, hit ? (distance < .055 ? "完美节拍！" : "展翅成功！") : "光标在绿区外，再试一次");
       if (hit) s.zone = [.31,.76,.42,.64][(s.hits - 1) % 4];
       s.cooldown = .26;
     } else if (s.id === "alpine") {
       s.lane = index;
-    } else if (s.id === "synth" && s.cooldown <= 0) {
+    } else if (s.id === "synth") {
       const hit = index === s.notes[s.hits];
       s.lastKey = index;
       s.pressAt = s.elapsed;
       award(hit, 100, hit ? "合拍！" : "再试一次，跟着亮键弹");
-      s.cooldown = .11;
     }
-    if (s.hits >= s.config.target && s.id !== "alpine") return finish();
+    if ((s.practice && s.hits>0) || (s.hits >= s.config.target && s.id !== "alpine")) return finish();
     extra.animate(s,1/60);
     syncUi();
     paint();
@@ -397,7 +558,7 @@
         s.phase = "playing";
         refs.cover.hidden = true;
         refs.controls.forEach(p => { p.disabled = false; });
-        refs.controls[0].focus({preventScroll:true});
+        refs.canvas.focus({preventScroll:true});
       } else if (Math.ceil(s.countdown) !== old) {
         refs.cover.firstElementChild.textContent = String(Math.ceil(s.countdown));
       }
@@ -408,7 +569,7 @@
       s.cursor = .5 + .46 * Math.sin(s.elapsed * 2.85 - 1);
       if (s.extra) {
         extra.tick(s,dt,award);
-        if (s.hits>=s.config.target) return finish();
+        if (s.hits>=(s.practice ? 1 : s.config.target)) return finish();
       }
       if (s.id === "alpine") {
         s.laneDraw += (s.lane - s.laneDraw) * Math.min(1, dt * 15);
@@ -418,10 +579,13 @@
           award(hit, 100, hit ? "穿过旗门！" : "错过旗门，瞄准下一旗");
           s.gate++;
           s.gateTime -= 2.85;
-          if (s.gate >= s.config.target) return finish();
+          if (s.practice) {
+            if (hit) return finish();
+            s.gate%=s.gateLanes.length;
+          } else if (s.gate >= s.config.target) return finish();
         }
       }
-      if (s.elapsed >= s.config.limit) return finish();
+      if (!s.practice && s.elapsed >= s.config.limit) return finish();
       extra.animate(s,dt);
     } else return;
     syncUi();
@@ -432,30 +596,57 @@
     const s = session;
     const r = refs;
     const enabled = s.phase === "playing";
+    const before = s.phase==="brief";
+    if (r.shownPhase!==s.phase) {
+      r.shownPhase=s.phase;
+      const rival=before ? inviteScore(s.id) : null;
+      let phaseText="计分挑战";
+      if (s.phase==="paused") phaseText="已暂停";
+      else if (s.practice) phaseText="试按 · 不计分";
+      else if (before) phaseText=rival===null ? "键盘 / 触屏" : "好友挑战 · "+rival+" 分";
+      r.phaseLabel.textContent=phaseText;
+      r.help.hidden=!before;
+      r.commands.hidden=!(before || (enabled && s.practice));
+      r.rehearse.hidden=!before;
+      r.clock.hidden=s.practice;
+      r.points.hidden=before || s.practice;
+      r.status.hidden=!enabled;
+      if (s.practice) r.launch.textContent="开始计分";
+    }
     r.controls.forEach((pad, i) => {
       if (pad.disabled !== !enabled) pad.disabled = !enabled;
-      const current = s.extra ? extra.wanted(s)===i : s.id === "alpine" ? s.lane === i : s.id === "synth" && s.notes[s.hits] === i;
+      const current = enabled && (s.extra ? extra.wanted(s)===i : s.id === "alpine" ? s.lane === i : s.id === "synth" ? s.notes[s.hits]===i : Math.abs(s.cursor-s.zone)<=.125);
       if (current && !pad.hasAttribute("aria-current")) pad.setAttribute("aria-current", "true");
       if (!current && pad.hasAttribute("aria-current")) pad.removeAttribute("aria-current");
     });
-    const timeText = "◷ " + Math.ceil(Math.max(0,s.config.limit - s.elapsed)) + " s";
+    const timeText = Math.ceil(Math.max(0,s.config.limit - s.elapsed)) + " 秒";
     const scoreText = String(s.score).padStart(4, "0") + " PT";
     if (r.clock.textContent !== timeText) r.clock.textContent = timeText;
     if (r.points.textContent !== scoreText) r.points.textContent = scoreText;
-    if (r.counts.hidden !== !enabled) r.counts.hidden = !enabled;
     if (!s.flash) tell("");
     const target = s.extra ? extra.objective(s) : s.id === "alpine" ? "第 " + (s.gate + 1) + " 旗 · " + lanes[s.gateLanes[s.gate]]
       : s.id === "synth" ? "下一个音 · " + s.config.pads[s.notes[s.hits]][0] : "抓住绿色节拍区";
-    const label = enabled ? target : "挑战目标 · " + s.config.target + " " + s.config.unit;
+    const label = enabled ? target : s.practice ? s.config.brief : "挑战目标 · " + s.config.target + " " + s.config.unit;
     if (r.objective.textContent !== label) r.objective.textContent = label;
-    const countText = s.hits + " / " + s.config.target;
+    const goalCount=s.practice ? 1 : s.config.target;
+    const countText = s.hits + " / " + goalCount;
     if (r.count.value !== countText) {
       r.count.value = countText;
-      r.fill.style.width = (s.hits / s.config.target * 100) + "%";
+      r.fill.style.width = (s.hits / goalCount * 100) + "%";
     }
   }
   function finish() {
     const s = session;
+    if (s.practice) {
+      s.phase="learned";
+      cancelAnimationFrame(raf);
+      extra.animate(s,null);
+      paint();
+      refs.pauseButton.hidden=true;
+      syncUi();
+      showCover("动作成功！",s.config.brief,"开始计分",start);
+      return;
+    }
     window.DeskAudio?.cue(s.hits >= s.config.target ? "reward" : "fail");
     const result = {id:s.id, title:s.config.title, score:s.score, cleared:s.hits,
       total:s.config.target, seconds:Math.ceil(Math.min(s.elapsed, s.config.limit)), at:Date.now(), mode:"arcade"};
@@ -643,10 +834,35 @@
     ctx.restore();
   }
 
+  function resultNavigation(r, full) {
+    const row=el("div","dp-result-nav");
+    row.setAttribute("role","group");
+    row.setAttribute("aria-label","接着玩");
+    const move=cameraMove(r);
+    const index=catalog.findIndex(game => r.mode==="arcade" ? game.id===r.id : game.moveId===move);
+    const localCamera = r.mode==="camera" && document.documentElement.dataset.device!=="board" &&
+      location.protocol!=="file:" && window.isSecureContext && Boolean(navigator.mediaDevices?.getUserMedia);
+    if (r.mode!=="arcade" && !localCamera) return row;
+    const play=game => {
+      if (!localCamera) { open(game.id); return; }
+      dialog.close();
+      window.dispatchEvent(new CustomEvent("desk:practice",{detail:game?.moveId || "all"}));
+    };
+    const replay=button("dp-secondary",index<0 ? "再闯八关" : "再玩这一关",() => play(catalog[index]));
+    const next=index>=0 && catalog[index+1];
+    if (full && next) {
+      const advance=button("dp-primary","下一关 · "+next.title,() => play(next));
+      row.append(advance,replay);
+    } else {
+      replay.className="dp-primary";
+      row.append(replay);
+    }
+    return row;
+  }
+
   function showResult(value) {
     const r = cleanResult(value);
     if (!r) return;
-    const isMotion = r.mode !== "arcade";
     const name = resultArt(r);
     frame("回血战报", "RE:CHARGE ARCADE / RESULT", "★", "#bdff98", session?.id === r.id);
     const body = el("div", "dp-result");
@@ -657,10 +873,21 @@
     const big = el("div", "dp-score-row");
     big.append(el("strong", "", String(r.score)), el("small", "", "PT"));
     const full = r.cleared === r.total && r.total > 0;
-    poster.append(el("p", "dp-tag", "工位回血 / " + date),
-      el("h3", "", r.title + (full ? " · 通关" : " · 战绩")), big,
-      el("div", "dp-result-detail", "达成 " + r.cleared + " / " + r.total + "　·　用时 " + r.seconds + " 秒"));
-    if (r.moves.length) poster.append(el("p","dp-result-detail","已完成 · "+r.moves.join("、")));
+    const modeName={arcade:"键盘 / 触屏",camera:"摄像头体感",board:"犀牛派体感"}[r.mode];
+    const stats=el("dl","dp-result-stats");
+    for (const [label,value] of [["目标达成",r.cleared+" / "+r.total],["用时",r.seconds+" 秒"]]) {
+      const group=el("div");
+      group.append(el("dt","",label),el("dd","",value));
+      stats.append(group);
+    }
+    poster.append(el("p", "dp-tag",modeName+" · "+date),
+      el("h3", "", r.title + (full ? " · 通关" : " · 战绩")), big,stats);
+    if (r.moves.length>1) {
+      const cleared=el("details","dp-result-moves");
+      cleared.append(el("summary","","已完成 "+r.moves.length+" 个动作"),el("p","",r.moves.join("、")));
+      poster.append(cleared);
+    }
+    const again = resultNavigation(r,full);
     const actions = el("div", "dp-actions");
     const message = el("p","dp-message");
     message.setAttribute("role","status");
@@ -752,11 +979,10 @@
         message.textContent = shareAddress ? "请复制上方链接发给朋友。" : "请复制上方挑战文案，和海报一起发给朋友。";
       }
     });
-    actions.append(download, invite, button("dp-secondary",isMotion ? "返回" : "再来一局",
-      () => isMotion ? dialog.close() : open(r.id)));
-    body.append(poster, actions, link, message, preview);
+    actions.append(download, invite);
+    body.append(poster, again, actions, link, message, preview);
     shell.append(body);
-    download.focus({preventScroll:true});
+    (again.firstElementChild || download).focus({preventScroll:true});
   }
 
   function posterCanvas(result, image) {

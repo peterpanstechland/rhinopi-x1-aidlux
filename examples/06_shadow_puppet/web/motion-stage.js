@@ -433,5 +433,12 @@
     if (Object.values(images).some(img=>!img.complete)) loading.set(canvas,snapshot||{});
     draw(canvas,snapshot||{});
   }
-  window.MotionStage = {paint,paintAvatar};
+  function paintBackdrop(context, action, width, height) {
+    ensureImages();
+    context.save();
+    context.scale(width/W,height/H);
+    background(context,plates[action] ?? plates.night);
+    context.restore();
+  }
+  window.MotionStage = {paint,paintAvatar,paintBackdrop};
 })();

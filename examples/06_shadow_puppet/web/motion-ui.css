@@ -1,0 +1,47 @@
+/* The game display and its camera controls share the cartridge console palette. */
+#view-board .live-grid {grid-template-columns:minmax(0, 2.2fr) minmax(255px, 1fr);gap:18px}
+#view-board .live-display {background:#262233;border:2px solid #504756;border-radius:15px;box-shadow:0 4px 0 #100e17}
+#view-board .stage-toolbar {padding:6px 12px 6px 16px;background:#302b3c}
+#view-board .stage-toolbar .eyebrow {color:#f1d9ad;font-size:12px;letter-spacing:.08em}
+#view-board .stage-views button {min-height:44px;border-radius:7px}
+#view-board .stage-views button[aria-pressed=true] {background:#c5ebbc;color:#20362f;border-color:transparent}
+#view-board .live-frame {border-block:2px solid #171622}
+.stage-prompt {padding:14px 16px 8px;color:#ffedcb}
+.stage-prompt-line {display:flex;align-items:baseline;justify-content:space-between;gap:12px}
+#stage-now {font-size:clamp(15px,1.6vw,21px);line-height:1.45}
+#stage-count {color:#c5edba;font:700 clamp(13px,1.7vw,20px) var(--mono);white-space:nowrap}
+#stage-progress {display:block;margin-top:9px;height:6px}
+.stage-prompt[data-state=waiting] #stage-now {color:#ffd19c}
+#view-board .stage-caption {padding:4px 16px 12px;color:#c8bed0}
+#view-board .telemetry {color:#312b36;background:#f3e6ca;border:2px solid #5b4d55;border-radius:15px;padding:clamp(14px,2vw,23px);box-shadow:inset 0 2px #fff5df,0 4px 0 #15121a}
+#view-board .telemetry h2 {color:#332838;font-size:clamp(23px,2.4vw,32px);line-height:1.2;margin:8px 0}
+#view-board .telemetry .eyebrow {color:#6a4b59}
+#view-board .telemetry p {color:#574754;min-height:0;margin:7px 0 10px;font-size:14px;line-height:1.55}
+#view-board .metric {color:#655462;border-color:#c8b9a1;margin-top:8px;padding-top:8px}
+#view-board .metric strong {color:#3b3040}
+#view-board #local-controls {margin-top:14px}
+#view-board #camera-info {font-size:12px;line-height:1.6}
+#view-board .telemetry .button {min-height:46px;border:2px solid #4a404b;border-radius:9px;color:#403643;background:#fff3da;box-shadow:0 2px 0 #655761;text-align:center;line-height:1.4}
+#view-board .telemetry .button.primary {background:#b7e8b2;color:#233d32}
+#view-board .telemetry .button:active {transform:translateY(2px);box-shadow:none}
+#view-board .telemetry button:focus-visible {outline:3px solid #634d81}
+#view-board #coach-canvas {border-color:#796b74}
+#view-board #guide-library {background:#242131;border-color:#494151;border-radius:12px}
+#guide-library h2 {color:#f2dfbd}
+#view-board #guide-picker button {min-height:44px;padding:7px 12px;border:1px solid #615464;background:#35303f;border-radius:7px;color:#e8dfeb}
+#view-board #guide-picker button[aria-pressed=true] {background:#c5ebbc;color:#223b30;border-color:#dcf6cc;box-shadow:0 2px 0 #6a9176}
+#view-board #guide-picker button:hover:not(:disabled) {border-color:#e3cfb1}
+#view-board .board-details summary {min-height:32px;padding:4px}
+@media(max-width:850px) {
+  #view-board .live-grid {grid-template-columns:1fr;gap:12px}
+  #view-board .telemetry {padding:15px}
+}
+@media(max-width:600px) {
+  #view-board .page-head {margin-bottom:12px}
+  #view-board .stage-toolbar {padding:3px 8px 3px 12px}
+  .stage-prompt {padding:9px 12px 5px}
+  #view-board .stage-caption {padding:2px 12px 8px}
+  #view-board #local-controls {margin-top:9px}
+  #view-board #guide-picker {display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+  #view-board #guide-picker button {padding:6px 3px}
+}

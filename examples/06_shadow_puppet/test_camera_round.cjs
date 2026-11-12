@@ -22,8 +22,8 @@ function player(ids) {
   let now = 0;
   return {
     status:null,
-    tick(pose={},n=1) {
-      for (let i=0;i<n;i++) this.status=round.update(frame(pose),now+=100);
+    tick(pose={},n=1,interval=100) {
+      for (let i=0;i<n;i++) this.status=round.update(frame(pose),now+=interval);
       return this.status;
     },
     ready() {
@@ -37,6 +37,12 @@ function player(ids) {
   };
 }
 const wide = y => ({left:[-1.5,y],right:[1.5,y]});
+function reachWingsTarget(p) {
+  p.ready();
+  for (let i=0;i<60 && p.status.sub==="play";i++) p.tick(wide(0));
+  assert.equal(p.status.sub,"clear");
+  return p.status;
+}
 function playAction(p) {
   p.ready();
   const id = p.status.act_id;
@@ -146,4 +152,45 @@ test("single-action timeouts are recorded without inventing cleared actions",() 
   assert.equal(p.status.cleared,0);
   assert.equal(p.status.round_score,0);
   assert.ok(p.status.round_ended_at>0);
+});
+
+test("a completed single action settles if the player leaves the camera",() => {
+  const p=player(["wings"]);
+  const cleared=reachWingsTarget(p);
+  const out={head:null,left:null,right:null};
+  p.tick(out,1,1000);
+  assert.equal(p.status.phase,"round");
+  assert.equal(p.status.challenge.cue,"动作达成！");
+  p.tick(out,1,2000);
+  assert.equal(p.status.phase,"summary");
+  assert.ok(p.status.round_ended_at>0);
+  assert.equal(p.status.cleared,1);
+  assert.equal(p.status.round_time,cleared.round_time);
+  assert.equal(p.status.round_score,cleared.round_score);
+  const ended=p.status.round_ended_at;
+  p.tick(out,10);
+  assert.equal(p.status.round_ended_at,ended);
+  assert.equal(p.status.results.length,1);
+});
+
+test("relay advances after a clear and waits for the landmarks needed by the next action",() => {
+  const p=player(["wings","nod"]);
+  const cleared=reachWingsTarget(p);
+  // The previous action only needed shoulders and wrists. Nodding needs the face.
+  p.tick({head:null},1,1200);
+  assert.equal(p.status.act_id,"nod");
+  assert.equal(p.status.sub,"ready");
+  assert.equal(p.status.challenge.tracking,false);
+  p.tick({head:null},30);
+  assert.equal(p.status.sub,"ready");
+  assert.equal(p.status.round_time,cleared.round_time);
+  assert.equal(p.status.round_score,cleared.round_score);
+  p.tick({left:null,right:null});
+  assert.equal(p.status.challenge.tracking,true);
+  assert.equal(p.status.sub,"ready");
+  p.ready();
+  assert.equal(p.status.round_time,cleared.round_time);
+  assert.equal(p.status.challenge.count,0);
+  p.tick();
+  assert.ok(p.status.round_time>cleared.round_time);
 });

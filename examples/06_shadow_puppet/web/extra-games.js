@@ -13,7 +13,7 @@
       title:"月台挥手", short:"PLATFORM WAVE", mark:"03", art:"wave", color:"#8ee0cf",
       target:10, limit:25, unit:"位乘客",
       brief:"举起小电的手，左右交替挥动，送别十位乘客。",
-      hint:"按 ←、→ 或点下方亮起的方向，小电会抬起一只手在脸旁左右挥。每换一侧就送走一位。",
+      hint:"跟着亮键，用 ← → 或左右按钮交替挥手。每换一侧就送走一位乘客。",
       pads:[["←","向左挥"],["→","向右挥"]], keys:["arrowleft","arrowright"],
     },
     hands_up: {
@@ -56,6 +56,7 @@
       case "wave": return 1-e.lastWave;
       case "nod": return e.down ? (s.elapsed-e.downAt>=.35 ? 1 : -1) : 0;
       case "turn": return e.side ? 1 : e.left<=e.right ? 0 : 2;
+      case "hands_up": return e.jumpTime>=JUMP_DURATION && !e.judged && e.obstacleTime>=CROSSING-.68 && e.obstacleTime<CROSSING-.16 ? 0 : -1;
       default: return -1;
     }
   }
@@ -66,7 +67,7 @@
       case "nod": return !e.down ? "向下点头给灯芯充能" : s.elapsed-e.downAt<.35 ? "保持片刻，等待绿灯" : "绿灯亮起 · 抬头";
       case "hands_up":
         if (e.jumpTime<JUMP_DURATION) return "腾空中";
-        return e.obstacleTime<CROSSING-.7 || e.judged ? "等待仙人掌靠近" : "现在起跳";
+        return wanted(s)===0 ? "现在起跳" : "等待仙人掌靠近";
       default: return "下一步 · " + s.config.pads[wanted(s)][1];
     }
   }

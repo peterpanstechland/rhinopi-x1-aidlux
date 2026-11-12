@@ -7,7 +7,10 @@
   <meta name="description" content="工位回血有八款上半身动作游戏。用摄像头、键盘或触屏任选一关，或跟小电连续闯八关，带走你的像素战报。">
   <title>工位回血 · RE:CHARGE ARCADE</title>
   <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="preload" as="image" href="art/partner-parts.png">
+  <link rel="preload" as="image" href="art/stage-plates.png">
   <link rel="stylesheet" href="arcade.css">
+  <link rel="stylesheet" href="motion-ui.css">
   <link rel="stylesheet" href="play.css">
   <link rel="stylesheet" href="opening.css">
   <script defer src="soundtrack.js"></script>
@@ -44,12 +47,12 @@
       <div class="hero">
         <div class="hero-picture"></div>
         <div class="hero-copy" id="lobby-intro">
-          <span class="hero-kicker"><span class="broadcast" aria-hidden="true"></span> ROOFTOP STATION</span>
+          <span class="hero-kicker"><span class="broadcast" aria-hidden="true"></span> 夜班行动</span>
           <h1>天台回血站<span class="title-dot">.</span></h1>
-          <p>展翅、挥手、滑雪、跳跃……八款动作游戏，任选一关。<br>也可以跟着小电，从天台一路玩到最后一个节拍。</p>
+          <p>站起来，跟小电闯过八个像素世界。</p>
           <div class="hero-actions">
-            <a class="button primary" id="hero-motion" href="#board"><i data-icon="scan"></i><span>体感八关连闯</span></a>
-            <a class="button glass" href="#cartridges"><i data-icon="grid"></i>选择单关</a>
+            <a class="button primary" href="#cartridges"><i data-icon="cartridge"></i>选一张卡带</a>
+            <a class="button glass" id="hero-motion" href="#board"><i data-icon="scan"></i><span>体感八关连闯</span></a>
           </div>
         </div>
         <div class="hero-copy" id="film-followup" hidden>
@@ -72,19 +75,23 @@
       </div>
       <section id="cartridges" aria-labelledby="cartridge-title">
         <div class="section-head">
-          <div class="section-name"><span class="section-icon"><i data-icon="cartridge"></i></span><h2 id="cartridge-title">挑战卡带</h2><span class="english">CARTRIDGE SELECT</span></div>
+          <div class="section-name"><span class="section-icon"><i data-icon="cartridge"></i></span><div><h2 id="cartridge-title">挑战卡带</h2><p id="deck-instruction" role="status"></p></div></div>
           <div class="stage-views deck-mode" role="group" aria-label="卡带操作方式"><button id="mode-motion" aria-pressed="true"><i data-icon="scan"></i>摄像头体感</button><button id="mode-keys" aria-pressed="false"><i data-icon="pad"></i>键盘 / 触屏</button></div>
         </div>
         <div class="deck" id="game-deck"></div>
       </section>
     </section>
     <section id="view-board" class="subpage" hidden aria-labelledby="board-title">
-      <div class="page-head"><div><div class="eyebrow">MOTION STATION</div><h1 id="board-title">体感舞台</h1></div><span class="connection" id="connection">准备中</span></div>
+      <div class="page-head"><div><div class="eyebrow">MOTION STATION</div><h1 id="board-title" tabindex="-1">体感舞台</h1></div><span class="connection" id="connection">准备中</span></div>
       <div id="board-live">
         <div class="live-grid"><div class="live-display">
           <div class="stage-toolbar"><span class="eyebrow" id="stage-heading">LIVE STAGE</span><div class="stage-views" role="group" aria-label="体感画面"><button id="show-stage" aria-pressed="true"><i data-icon="pad"></i>像素舞台</button><button id="show-camera" aria-pressed="false"><i data-icon="scan"></i>摄像头</button></div></div>
           <div class="live-frame"><canvas id="motion-canvas" width="384" height="216" aria-label="玩家驱动的像素舞台"></canvas><video id="local-video" muted playsinline autoplay hidden aria-label="本机镜像摄像头"></video><img id="stream" hidden alt="实时摄像头与原始动作反馈"><div id="stream-wait" hidden>正在接入画面…</div><div id="hit-feedback" role="status" hidden></div></div>
-          <div class="stage-caption"><span><b></b><span id="tracking-caption">准备开始</span></span><span id="stage-source">MOTION PLAY</span></div>
+          <div class="stage-prompt" id="stage-prompt">
+            <div class="stage-prompt-line"><strong id="stage-now">跟小电做动作</strong><span id="stage-count" hidden></span></div>
+            <progress id="stage-progress" max="1" value="0" hidden aria-label="本关动作完成量"></progress>
+          </div>
+          <div class="stage-caption"><span><b></b><span id="tracking-caption" role="status">准备开始</span></span><span id="stage-source">MOTION PLAY</span></div>
         </div>
           <aside class="telemetry">
             <span class="eyebrow" id="round-label">动作示范</span><h2 id="phase">天台展翅</h2><p id="live-tip"></p>
@@ -93,12 +100,12 @@
               <div class="metric"><span id="hp-label">工位能量</span><strong id="hp">—</strong></div><progress id="hp-bar" max="100" value="0" aria-label="工位能量"></progress>
               <div class="metric"><span id="time-label">预计提醒</span><strong id="remain">—</strong></div>
               <div class="metric" id="posture-row"><span>当前坐姿</span><strong id="posture">—</strong></div>
-              <div id="challenge-row" hidden><div class="metric"><span>动作完成量</span><strong id="challenge-percent">0%</strong></div><progress id="challenge-bar" max="1" value="0" aria-label="当前动作进度"></progress></div>
             </div>
             <div id="local-controls" hidden>
               <p id="camera-info" role="status">摄像头画面只在本机处理。面对镜头，让头、肩和双手入画。</p>
               <button class="button primary" id="start-camera"><i data-icon="scan"></i><span id="start-label">开启摄像头闯八关</span></button>
               <button class="button glass" id="stop-camera" hidden>退出并关闭摄像头</button>
+              <button class="button glass" id="practice-keys"><i data-icon="pad"></i><span id="practice-label">用键盘 / 触屏试玩</span></button>
             </div>
             <div id="board-summary" hidden><button class="button primary" id="share-board"><i data-icon="cup"></i><span id="share-board-label">查看战报</span></button></div>
           </aside>
@@ -106,11 +113,11 @@
         <div id="guide-library" hidden><h2>选择体感挑战</h2><div id="guide-picker" role="group" aria-label="选择八关连闯或单个动作"></div><p>选择一关可先看动作示范，再开启摄像头挑战。八关连闯从展翅开始。</p></div>
       </div>
       <details id="board-offline" class="board-details">
-        <summary>连接犀牛派 X1 · 八种体感动作</summary>
+        <summary>连接犀牛派 X1</summary>
         <div class="connect-copy"><p>在开发板上启动游戏，用同一局域网打开板端地址，摄像头就会驱动舞台上的小电。</p>
           <code>python3 game.py --demo</code>
           <form id="connect-form"><label for="board-address">开发板地址</label><div class="address-row"><input id="board-address" placeholder="例：192.168.1.100:8090" spellcheck="false" required><button class="button primary">打开板端<i data-icon="arrow"></i></button></div><span id="address-error" role="alert"></span></form>
-          <a class="text-link" href="#lobby">先玩键盘 / 触屏版 <i data-icon="arrow"></i></a>
+          <a class="text-link" id="board-keys-link" href="#cartridges">选一张键盘 / 触屏卡带 <i data-icon="arrow"></i></a>
         </div>
       </details>
     </section>
@@ -123,16 +130,21 @@
   <dialog id="opening-dialog" aria-labelledby="opening-title">
     <div class="film-head"><div><small>工位回血 · 序章</small><h2 id="opening-title">夜班行动</h2></div><button type="button" id="skip-opening" class="film-skip" autofocus>跳过片头 <span aria-hidden="true">→</span></button></div>
     <div class="film-frame"><video id="opening-film" playsinline preload="none" muted aria-labelledby="opening-title" aria-describedby="film-story-text"></video></div>
-    <progress id="film-progress" value="0" max="54.5" aria-label="片头播放进度"></progress>
+    <div class="film-seek"><input type="range" id="film-progress" min="0" max="54.5" step="0.5" value="0" aria-label="定位到片头时间" disabled><span id="film-time" aria-hidden="true">00:00 / 00:55</span></div>
     <p id="film-error" role="status" hidden>片头视频未能载入，可以看文字版或跳过片头。</p>
     <div class="film-controls">
       <button type="button" id="film-play">暂停</button><button type="button" id="film-audio">开启声音</button>
-      <span id="film-time" aria-hidden="true">00:00 / 00:55</span>
+      <button type="button" id="film-trial" hidden></button>
     </div>
     <details id="film-story"><summary>看文字版</summary><div id="film-story-text"><p>下班前，开发者还在修最后一个 bug。两小时过去，他伏在桌上，肩和腰都酸了。游戏里的八座信号站熄了灯，小电跳出屏幕，邀他站起来，一起把信号送回城里。</p><p>他打开摄像头，双臂平举五秒，点亮天台。跟着小电扇翅升空、向月台乘客挥手、侧身穿过雪岭旗门。他对准亮键压下手腕，琴声把信号送到沙漠。他轻轻挺起上身，画面里的角色跳过仙人掌。左右转头对准灯塔，再随节拍点头，第八盏灯亮起，整座城恢复供电。</p><p>回到工位，他松开扶腰的手，点了「休息一下」。那个 bug 还在，但今晚多了一张八关战报，可以约同事再玩一轮。</p></div></details>
   </dialog>
-  <dialog id="help-dialog" class="help-dialog"><div class="modal-top"><span class="eyebrow">PLAYER GUIDE</span><button class="icon-button" id="close-help" aria-label="关闭说明"><i data-icon="close"></i></button></div>
-    <h2>怎么玩？</h2><dl><dt>体感舞台</dt><dd>选一个动作单练，或挑战全部八关。先看示范，再打开摄像头跟做。犀牛派默认每轮抽取六个动作。</dd><dt>键盘 / 触屏</dt><dd>在挑战卡带上方切换操作方式，八款游戏都能用键盘和触屏玩。</dd><dt>带走战报</dt><dd>结束后可以保存像素战报，也可以把挑战链接发给朋友。最近的成绩保存在当前浏览器。</dd></dl><button class="button primary" id="help-done">知道了<i data-icon="arrow"></i></button>
+  <dialog id="help-dialog" class="help-dialog" aria-labelledby="help-title"><div class="modal-top"><img src="art/bot.png" alt="" width="38" height="38"><button class="icon-button" id="close-help" aria-label="关闭说明"><i data-icon="close"></i></button></div>
+    <h2 id="help-title">怎么玩？</h2>
+    <dl><dt>跟小电做动作</dt><dd>进体感舞台先看示范。让头、肩和双手入镜，开启摄像头后再跟做。浏览器可以单练或连闯八关，犀牛派默认每轮抽六关。</dd>
+    <dt>用键盘或手机玩</dt><dd>选「键盘 / 触屏」。点卡带，或用 Tab 聚焦卡带、方向键选关、回车进入。点「先试按键」熟悉动作，正式挑战时可按 P 暂停。</dd>
+    <dt>从片头进游戏</dt><dd>拖动进度条找到喜欢的动作，点「试玩」就能进入那关。</dd>
+    <dt>约朋友挑战</dt><dd>打完一局就能保存海报或发出邀请，在「我的战绩」还能找回最近的战报。</dd></dl>
+    <button class="button primary" id="help-done">知道了<i data-icon="arrow"></i></button>
   </dialog>
 </body>
 </html>

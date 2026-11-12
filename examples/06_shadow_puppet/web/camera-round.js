@@ -261,6 +261,18 @@
       this.cue=this.nodStage==="lift" ? "抬头，看正前方" : "保持双肩不动，轻轻低头再抬起";
     }
     update(frame, now) {
+      // Settlement lasts 1.15 seconds even when the player steps out of view.
+      // Resolve it before checking which landmarks the next action requires.
+      if (this.sub === "clear" && !this.doneAt && now >= this.clearUntil) {
+        if (this.index === this.acts.length - 1) this.doneAt = Date.now();
+        else {
+          this.index++;
+          this.sub = "ready";
+          this.phaseTime = 0;
+          this.lastFrame = null;
+          this.resetAction();
+        }
+      }
       const raw = frame.pose_points || [];
       const aspect = frame.pose_aspect || 1;
       const pts = raw.map(p => p && Number.isFinite(p[0]) && Number.isFinite(p[1]) ? {x:p[0]*aspect,y:p[1]} : null);
@@ -277,19 +289,13 @@
         this.resetTracking();
         if (this.sub === "ready") this.phaseTime=0;
       }
-      if (tracked && !this.doneAt) {
+      if (tracked && !this.doneAt && this.sub !== "clear") {
         const span=pts[12].x-pts[11].x, center=(pts[11].x+pts[12].x)/2;
         const shoulderY=(pts[11].y+pts[12].y)/2, tilt=(pts[12].y-pts[11].y)/span;
         if (this.sub === "ready") {
           this.home={center,shoulderY,tilt,nose:pts[0]?(pts[0].x-center)/span:0,depth:pts[0]?(pts[0].y-shoulderY)/span:0};
           this.phaseTime+=dt;
           if (this.phaseTime>=1.4) { this.sub="play"; this.phaseTime=0; }
-        } else if (this.sub === "clear") {
-          this.phaseTime+=dt;
-          if (this.phaseTime>=1.15) {
-            if (this.index===this.acts.length-1) this.doneAt=Date.now();
-            else { this.index++; this.sub="ready"; this.phaseTime=0; this.resetAction(); }
-          }
         } else {
           this.elapsed+=dt;
           const before=this.count;
@@ -300,13 +306,13 @@
             this.completed.push({id:act.id,name:act.name,cleared:true});
             this.score+=100;
             this.sub="clear";
-            this.phaseTime=0;
+            this.clearUntil=now+1150;
           }
           if (this.elapsed>=this.limit) this.doneAt=Date.now();
         }
       }
       const current=this.acts[this.index];
-      const cue = !tracked ? "请让需要的部位回到画面，计时已暂停" : this.sub==="ready" ? "面对镜头回到正中，准备开始" : this.sub==="clear" ? "动作达成！" : this.cue;
+      const cue = this.sub==="clear" ? "动作达成！" : !tracked ? "请让需要的部位回到画面，计时已暂停" : this.sub==="ready" ? "面对镜头回到正中，准备开始" : this.cue;
       return {
         source:"camera",camera_online:true,pose_points:raw,pose_aspect:aspect,
         phase:this.doneAt?"summary":"round",sub:this.sub,act:current.name,act_id:current.id,act_goal:current.goal,
