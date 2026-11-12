@@ -155,7 +155,8 @@
         target.arms = [69,77,-25,e.lastWave ? -52 : -128];
         break;
       case "lean":
-        target.lean = s.lane - 1;
+        // Steer into the glide, including the return from an outer lane.
+        target.lean = Math.max(-1,Math.min(1,(s.lane-s.laneDraw)*3));
         target.arms = [54,68,54,68];
         break;
       case "piano": {

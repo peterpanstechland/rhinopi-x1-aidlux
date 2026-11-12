@@ -1077,13 +1077,6 @@ class Stage:
     # ---------- foreground ----------
 
     def draw_fg(self, scr: PixelScreen) -> None:
-        if self.scene == "ski":
-            fx = int(AV_X + self.avatar_dx)
-            foot = GROUND + int(self.avatar_dy)
-            for dx in (-12, 2):
-                scr.rect(fx + dx - 1, foot + 1, 14, 4, NIGHT)
-                scr.rect(fx + dx, foot + 2, 12, 2, CYAN)
-                scr.rect(fx + dx + 10, foot + 2, 2, 2, AZURE)
         if self.scene == "dino":
             # coach: bounce in chair (not arm-flap like eagle)
             hx, hy, hw, hh = 6, 40, 52, 58

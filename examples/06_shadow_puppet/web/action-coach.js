@@ -35,8 +35,8 @@
       ['向内挥', .55, pose([69,77,5,-132])]
     ],
     lean:[
-      ['向左倾', .95, pose([57,67,57,67], {lean:-1})], ['回到中间', .6, neutral],
-      ['向右倾', .95, pose([57,67,57,67], {lean:1})], ['回到中间', .6, neutral]
+      ['向左倾', .95, pose([57,67,57,67], {lean:-1})], ['身体回正', .6, neutral],
+      ['向右倾', .95, pose([57,67,57,67], {lean:1})], ['身体回正', .6, neutral]
     ],
     piano:[
       ['张开手指', .85, neutral], ['轻弯亮起的手指', .55, pose(calm, {press:1})], ['伸直松键', .65, neutral]
@@ -130,8 +130,19 @@
     window.MotionStage.paintBackdrop(c,id,W,125);
     box(c,0,0,W,125,id==='piano'?'#251b383e':'#28233920');
   }
+  function skiDemoX(f) {
+    if (f.obstacle || reduced?.matches) return 128 + 31*f.sample.lean;
+    // Carry the glide through the release. The skier turns the other way on the next lean.
+    const step = f.index - f.index%2;
+    const turn = demos.lean[step][1], release = demos.lean[step+1][1];
+    const elapsed = f.index===step ? turn*f.progress : turn+release*f.progress;
+    const t = Math.min(1,elapsed/(turn+.68*release));
+    const travel = t*t*(3-2*t);
+    return 128 + (step===0 ? 1 : -1)*31*(1-2*travel);
+  }
   // The guide feeds the same shoulder, elbow and wrist landmarks as a live player.
-  function demoAvatar(c, id, pose) {
+  function demoAvatar(c, id, f) {
+    const pose = f.sample;
     const points = [];
     points[0] = [.5 + pose.yaw * .04, .34 + .045 * pose.pitch];
     for (let side = 0; side < 2; side++) {
@@ -151,11 +162,12 @@
       box(c,108,111,40,5,'#76738a');
       box(c,112,116,3,8,dim); box(c,141,116,3,8,dim);
     }
-    const px=128+pose.lean*(id==='lean'?31:7);
-    if(id!=='flap') box(c,px-20,115,40,3,'#29233770');
+    const px=id==='lean' ? skiDemoX(f) : 128+pose.lean*7;
+    if(id!=='flap' && id!=='lean') box(c,px-20,115,40,3,'#29233770');
+    const feetY=id==='lean' ? 102 : 116 - pose.lift * 11 - (id==='flap'?7:0);
     window.MotionStage.paintAvatar(c, {
       phase:'round', act_id:id, pose_points:points, pose_aspect:1, challenge:{visual}
-    },px,116 - pose.lift * 11 - (id==='flap'?7:0),.98);
+    },px,feetY,.98);
   }
   function prompts(c,id,f) {
     const {sample:p,index,progress} = f;
@@ -174,7 +186,7 @@
     } else if(id==='wave') {
       arrow(c,170,46,index===2?156:184,46,gold);
     } else if(id==='lean') {
-      const side=p.lean<0?-1:1;
+      const side=index<2?-1:1;
       const x=128+(f.obstacle==='tree'?-side:side)*91;
       if (f.obstacle==='tree') {
         box(c,x-2,85,4,12,'#ac9280');
@@ -264,7 +276,7 @@
         const raised=side=>p[11+side] && p[15+side] && p[15+side][1]<p[11+side][1];
         if (raised(0) && !raised(1)) {c.translate(W,0);c.scale(-1,1);}
       }
-      demoAvatar(c,id,f.sample);
+      demoAvatar(c,id,f);
       prompts(c,id,f);
       c.restore();
     }

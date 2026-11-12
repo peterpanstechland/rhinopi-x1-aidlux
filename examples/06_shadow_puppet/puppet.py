@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import math
 from functools import lru_cache
 from pathlib import Path
 
@@ -32,6 +33,47 @@ def _sprite_parts():
     if sheet is None or sheet.shape != (78, 156, 4):
         raise ValueError(f"Invalid Xiaodian sprite sheet: {path}")
     return sheet[:, :78], sheet[:, 78:]
+
+
+@lru_cache(maxsize=1)
+def _ski_torso():
+    path = Path(__file__).resolve().parent / "web" / "art" / "partner-parts.png"
+    sheet = cv2.imdecode(np.frombuffer(path.read_bytes(), np.uint8), cv2.IMREAD_UNCHANGED)
+    if sheet is None or sheet.shape != (48, 384, 4):
+        raise ValueError(f"Invalid partner sprite sheet: {path}")
+    return sheet[:, 96:144]
+
+
+def _draw_ski_stance(dst, cx, ground, bank):
+    """Project each ski and its boot around the same binding on the snow."""
+    sin, cos = math.sin(bank*math.pi/3), math.cos(bank*math.pi/3)
+    scale = .75
+    feet = [(side, side*(8+2*cos), -side*sin*4) for side in (-1, 1)]
+    feet.sort(key=lambda foot: foot[2])
+
+    def project(x, y, across, forward, height):
+        return (round(cx+scale*(x+across*cos+forward*sin)),
+                round(ground+scale*(y+(forward*cos-across*sin)*.65-height)))
+
+    def face(x, y, corners, tint):
+        points = np.array([project(x, y, *v) for v in corners], np.int32)
+        cv2.fillPoly(dst, [points], tint)
+
+    for _, x, y in feet:
+        face(x, y, [(-3,-18,1),(3,-18,1),(4,22,1),(2,30,4),(-2,30,4),(-4,22,1)], INK)
+        face(x, y, [(-2,-16,2),(2,-16,2),(3,21,2),(-3,21,2)], (225,206,132,255))
+        face(x, y, [(-3,17,2),(3,17,2),(3,24,3),(-3,24,3)], (71,113,237,255))
+        face(x, y, [(-3,24,3),(3,24,3),(1,29,4),(-1,29,4)], GOLD)
+    for side, x, y in feet:
+        hip = (round(cx+scale*(bank*5+side*5)), round(ground-scale*(19-2*abs(bank))))
+        knee = (round(cx+scale*(x+sin*6)), round(ground+scale*(y-10-side*bank*2)))
+        ankle = project(x, y, 0, 0, 5)
+        for start, end in [(hip,knee),(knee,ankle)]:
+            cv2.line(dst, start, end, INK, 5)
+            cv2.line(dst, start, end, SLEEVE, 3)
+        face(x, y, [(-4,-4,7),(4,-4,7),(5,5,5),(3,10,1),(-3,10,1),(-5,5,4)], INK)
+        face(x, y, [(-3,-4,8),(3,-4,8),(4,2,7),(3,8,4),(-3,8,4),(-4,2,7)], (45,105,221,255))
+        face(x, y, [(-3,1,7),(3,1,7),(3,3,6),(-3,3,6)], GOLD)
 
 
 def _blit(dst, src, x, y):
@@ -146,7 +188,12 @@ class PixelPuppet:
                 cv2.line(layer, _pt(shoulder), _pt(elbow), INK, 7)
                 cv2.line(layer, _pt(shoulder), _pt(elbow), SLEEVE, 4)
                 self._forearm(layer, elbow, wrist)
-        _blit(layer, self.body, *PAD)
+        if style == "ski":
+            bank = float(np.clip(lean, -1, 1))
+            _draw_ski_stance(scr.p, cx, cy + BODY_H, bank)
+            _blit(layer, _ski_torso(), PAD[0]+15, PAD[1]+26)
+        else:
+            _blit(layer, self.body, *PAD)
         nose = self.j.get("nose")
         yaw = float(nose[0]) if nose is not None else 0.
         rest_y = float(np.clip((nose[1]+.68)*9, -3, 5)) if nose is not None else 0.

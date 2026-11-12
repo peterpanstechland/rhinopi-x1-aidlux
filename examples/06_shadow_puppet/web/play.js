@@ -572,7 +572,7 @@
         if (s.hits>=(s.practice ? 1 : s.config.target)) return finish();
       }
       if (s.id === "alpine") {
-        s.laneDraw += (s.lane - s.laneDraw) * Math.min(1, dt * 15);
+        s.laneDraw += (s.lane - s.laneDraw) * (1-Math.exp(-dt*8));
         s.gateTime += dt;
         if (s.gateTime >= 2.85) {
           const hit = s.lane === s.gateLanes[s.gate];
@@ -775,7 +775,6 @@
     }
     box(ctx,"#ffe3a2",x-rw,y-ht,2*rw,2);
     const playerX=laneX(s.laneDraw,1);
-    box(ctx,"#8bb8bd",playerX-13,111,27,3);
     window.MotionStage.paintAvatar(ctx,extra.snapshot(s),playerX,107,.57);
     if(s.flash>.1 && s.good) star(ctx,playerX+18,72,"#fff4bc",2);
   }

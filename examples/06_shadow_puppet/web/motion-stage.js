@@ -121,12 +121,14 @@
     line(c,shoulder,elbow,4,'#83ad79');
     forearm(c,elbow,hand);
   }
-  function leg(c, hip, knee, foot, near) {
-    const ankle={x:foot.x,y:foot.y-5};
+  function shin(c, hip, knee, ankle, near) {
     line(c,hip,knee,8,'#42142b'); line(c,knee,ankle,7,'#42142b');
     line(c,hip,knee,5,near?'#83ad79':'#609575');
     line(c,knee,ankle,4,near?'#609575':'#395c51');
     rect(c,knee.x-3,knee.y-2,7,4,near?'#b5ce8b':'#83ad79');
+  }
+  function leg(c, hip, knee, foot, near) {
+    shin(c,hip,knee,{x:foot.x,y:foot.y-5},near);
     c.save();
     c.translate(round(foot.x),round(foot.y));
     if(!near) c.scale(-1,1);
@@ -169,12 +171,46 @@
     c.drawImage(wingSprite,-1,-16);
     c.restore();
   }
+  function skiStance(c, hip, bank) {
+    // Both skis pivot about their bindings in the plane of the slope.
+    // Positive forward points downhill, toward the viewer when centered.
+    const yaw = bank * Math.PI / 3, sin = Math.sin(yaw), cos = Math.cos(yaw);
+    const feet = [-1,1].map(side => {
+      const x = side * (8 + 2*cos), y = -side * sin * 4;
+      const project = ([across,forward,height=0]) => [
+        x + across*cos + forward*sin, y + (forward*cos - across*sin)*.65 - height
+      ];
+      return {side,x,y,face:(points,color) => path(c,points.map(project),color)};
+    }).sort((a,b) => a.y-b.y);
+
+    for (const {face} of feet) {
+      // Raised coral tips and a blue running edge make the fore/aft direction legible.
+      face([[-2,-15,-1],[2,-15,-1],[3,14,-1],[2,26,0],[-2,26,0],[-3,14,-1]],'#45667247');
+      face([[-3,-18,1],[3,-18,1],[4,17,1],[4,25,2],[2,30,4],[-2,30,4],[-4,25,2],[-4,17,1]],'#373a51');
+      face([[-2,-16,2],[2,-16,2],[3,17,2],[3,24,3],[-3,24,3],[-3,17,2]],'#84cee1');
+      face([[-2,-12,2],[0,-12,2],[1,17,2],[-2,17,2]],'#e5f9e4');
+      face([[-3,17,2],[3,17,2],[3,24,3],[-3,24,3]],'#ed7147');
+      face([[-3,24,3],[3,24,3],[1,29,4],[-1,29,4]],'#ffdf94');
+    }
+    for (const {side,x,y,face} of feet) {
+      const inside = side*bank;
+      const knee = {x:x + sin*6, y:y-10-inside*2};
+      shin(c,{x:hip.x+side*5,y:hip.y},knee,{x,y:y-5},inside<=0);
+      // A high cuff, a low toe box and the sole all share the runner's local axes.
+      face([[-4,-4,6],[4,-4,6],[5,4,5],[4,9,3],[3,10,1],[-3,10,1],[-5,7,2],[-5,0,4]],'#513348');
+      face([[-4,-4,8],[4,-4,8],[4,2,7],[4,7,5],[2,9,3],[-3,9,3],[-4,6,5],[-4,0,6]],'#dd692d');
+      face([[-3,-4,8],[3,-4,8],[3,1,8],[-3,1,8]],'#ffb154');
+      face([[-4,1,7],[4,1,7],[4,3,6],[-4,3,6]],'#803d39');
+      face([[-2,1,8],[1,1,8],[1,3,7],[-2,3,7]],'#ffe6a3');
+      face([[-3,5,5],[3,5,5],[2,8,4],[-2,8,4]],'#ffb65d');
+    }
+  }
   function sportAvatar(c,pose,at,action,visual,time,scale) {
     const flight=action==='flap', bank=clamp(number(visual.avatar_dx)/58,-1,1);
     const arms=[limbs(pose,0,0),limbs(pose,1,0)];
     const angles=arms.map((a,i)=>clamp(Math.atan2(a.hand.y-a.shoulder.y,(i?1:-1)*(a.hand.x-a.shoulder.x)),-1.15,1.15));
     const bob=flight ? -3*Math.cos((angles[0]+angles[1])*.5+1.6) : 0;
-    const hip={x:flight?0:bank*5,y:flight?-23+bob:-18};
+    const hip={x:flight?0:bank*5,y:flight?-23+bob:-19+2*Math.abs(bank)};
     const neck={x:hip.x+(flight?0:bank*6),y:hip.y-15};
     c.save(); c.translate(round(at.x),round(at.y)); c.scale(scale*1.32,scale*1.32);
     if (flight) {
@@ -182,14 +218,7 @@
       leg(c,{x:-4,y:hip.y},{x:-10,y:-15+bob},{x:-15,y:-10+bob},false);
       leg(c,{x:5,y:hip.y},{x:9,y:-13+bob},{x:7,y:-3+bob},true);
     } else {
-      // Boots sit on separate runners. The hips move over the inside edge during a turn.
-      for (const [i,y] of [[0,-2],[1,2]]) {
-        const x=i?5:-7;
-        path(c,[[x-21,y-1],[x-17,y+1],[x+14,y],[x+23,y-4],[x+21,y],[x+15,y+3],[x-17,y+4],[x-22,y+1]],'#47354a');
-        line(c,{x:x-16,y:y+1},{x:x+14,y},2,i?'#ffb675':'#98dacf');
-      }
-      leg(c,{x:hip.x-4,y:hip.y},{x:-8+bank*6,y:-10},{x:-9,y:-2},false);
-      leg(c,{x:hip.x+5,y:hip.y},{x:9+bank*6,y:-8},{x:8,y:1},true);
+      skiStance(c,hip,bank);
     }
     const tail=round(Math.sin(time*6)*1.5);
     const scarf=flight||bank>=0?-1:1;
@@ -454,7 +483,7 @@
       venueLights(c,action,progress,visual);
     }
     const shadowWidth=clamp(52-(FLOOR-at.y)*.4,19,52);
-    if(action!=='flap'){
+    if(action!=='flap' && action!=='lean'){
       rect(c,at.x-shadowWidth/2,FLOOR+1,shadowWidth,3,'#4c4759');
       rect(c,at.x-shadowWidth*.35,FLOOR+4,shadowWidth*.7,1,'#575362');
     }
